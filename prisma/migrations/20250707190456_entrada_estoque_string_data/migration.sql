@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "EntradaEstoque" ALTER COLUMN "data" DROP DEFAULT,
+ALTER COLUMN "data" SET DATA TYPE TEXT;

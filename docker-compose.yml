@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Senha123
+      POSTGRES_DB: precificador
+    ports:
+      - "5432:5432"
+    volumes:
+      - prisma-data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    environment:
+      # aqui diz pro Prisma falar com o host "db" na porta 5432
+      DATABASE_URL: "postgresql://postgres:Senha123@db:5432/precificador?schema=public"
+
+volumes:
+  prisma-data:

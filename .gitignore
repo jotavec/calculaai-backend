@@ -1,0 +1,53 @@
+# ==== Node / Backend ====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+# ==== Build / Cache ====
+dist/
+build/
+.cache/
+.tmp/
+
+# ==== Env / Secrets ====
+.env
+.env.*
+!.env.example
+
+# ==== Logs ====
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ==== IDE ====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ==== Uploads / Arquivos dinâmicos ====
+uploads/
+public/uploads/
+
+# ==== Arquivos grandes / pacotes ====
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.bak
+
+# ==== PDFs e prévias locais ====
+*.pdf
+
+# ==== Prisma ====
+prisma/dev.db
+prisma/dev.db-journal
+
+# ==== Coverage ====
+coverage/
+.nyc_output/

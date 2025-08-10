@@ -1,0 +1,337 @@
+// Conexão com o banco PostgreSQL
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Gerador do Prisma Client
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                         String                 @id @default(uuid())
+  name                       String
+  email                      String                 @unique
+  passwordHash               String
+  createdAt                  DateTime               @default(now())
+  cpf                        String?
+  telefone                   String?
+  ingredients                Ingredient[]
+  fixedCostCategories        FixedCostCategory[]
+  fixedCosts                 FixedCost[]
+  recipes                    Recipe[]
+  pricingSettings            PricingSetting?
+  companyConfig              CompanyConfig?
+  salesGoals                 SalesGoal[]
+  salesResults               SalesResult[]
+  categorias                 Categoria[]            @relation("UserCategorias")
+  marcas                     Marca[]
+  funcionarios               Funcionario[]
+  encargosSobreVenda         EncargosSobreVenda[]
+  filtroFaturamentoMediaTipo String?
+  blocos                     Bloco[]
+  blocoAtivos                BlocoAtivos[]
+  entradasEstoque            EntradaEstoque[]
+  categoriasNutricionais     CategoriaNutricional[]
+  tiposProduto               TipoProduto[]
+  avatarUrl                  String?                // <--- já tinha aqui
+  plano                      String                 @default("gratuito") // <--- CAMPO ADICIONADO AQUI!
+}
+
+model Funcionario {
+  id                   String   @id @default(uuid())
+  nome                 String
+  cargo                String
+  tipoMaoDeObra        String
+  salario              String
+  totalHorasMes        String
+  horasPorDia          String?
+  diasPorSemana        String?
+  fgts                 String
+  inss                 String
+  rat                  String
+  ferias13             String
+  valeTransporte       String
+  valeAlimentacao      String
+  valeRefeicao         String
+  planoSaude           String
+  outros               String
+  fgtsValor            String
+  inssValor            String
+  ratValor             String
+  ferias13Valor        String
+  valeTransporteValor  String
+  valeAlimentacaoValor String
+  valeRefeicaoValor    String
+  planoSaudeValor      String
+  outrosValor          String
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model FixedCostCategory {
+  id         String      @id @default(uuid())
+  name       String
+  userId     String
+  user       User        @relation(fields: [userId], references: [id])
+  fixedCosts FixedCost[]
+  createdAt  DateTime    @default(now())
+}
+
+model FixedCost {
+  id         String            @id @default(uuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id])
+  categoryId String
+  category   FixedCostCategory @relation(fields: [categoryId], references: [id])
+  name       String
+  value      Float
+  createdAt  DateTime          @default(now())
+}
+
+model Ingredient {
+  id          String             @id @default(uuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id])
+  name        String
+  brand       String?
+  unitType    String
+  qtyPerPack  Float
+  pricePack   Float
+  createdAt   DateTime           @default(now())
+  recipeItems RecipeIngredient[]
+}
+
+model Recipe {
+  id           String             @id @default(uuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id])
+  name         String
+  yieldQty     Float
+  yieldUnit    String
+  notes        String?
+  createdAt    DateTime           @default(now())
+  ingredients  RecipeIngredient[]
+  ingredientes Json?
+  embalagens   Json?
+  subReceitas  Json?
+  maoDeObra    Json?
+  imagemFinal      String?
+  conservacaoData  Json?
+  passosPreparo    Json?
+  tipoSelecionado        Json?
+  dataUltimaAtualizacao  String?
+  tempoTotal            String?
+  tempoUnidade          String?
+  precoVenda         String?
+  pesoUnitario       String?
+  descontoReais      String?
+  descontoPercentual String?
+  blocoMarkupAtivo String?
+}
+
+model RecipeIngredient {
+  id           String     @id @default(uuid())
+  recipeId     String
+  ingredientId String
+  recipe       Recipe     @relation(fields: [recipeId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  qtyUsed      Float
+}
+
+model PricingSetting {
+  id                String  @id @default(uuid())
+  userId            String  @unique
+  user              User    @relation(fields: [userId], references: [id])
+  markupPercent     Float
+  lossPercent       Float
+  commissionPercent Float
+  taxPercent        Float
+  embedFixedCosts   Boolean
+}
+
+model CompanyConfig {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id])
+  companyName       String
+  cnpj              String?
+  phone             String?
+  cep               String?
+  rua               String?
+  numero            String?
+  bairro            String?
+  cidade            String?
+  estado            String?
+  rentCost          Float?
+  energyCost        Float?
+  salaryCost        Float?
+  defaultMarkup     Float?
+  defaultTax        Float?
+  defaultCommission Float?
+  createdAt         DateTime @default(now())
+}
+
+model SalesGoal {
+  id     String @id @default(uuid())
+  userId String
+  month  String
+  value  Float
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model SalesResult {
+  id     String @id @default(uuid())
+  userId String
+  month  String
+  value  Float
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model Categoria {
+  id     String @id @default(uuid())
+  nome   String
+  userId String
+  user   User   @relation(fields: [userId], references: [id], name: "UserCategorias")
+}
+
+model Marca {
+  id     String @id @default(uuid())
+  nome   String
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model EncargosSobreVenda {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Bloco {
+  id                 Int           @id @default(autoincrement())
+  nome               String
+  markup             String?
+  markupIdeal        String?
+  gastosFaturamento  String?
+  impostos           String?
+  taxasPagamento     String?
+  comissoes          String?
+  outros             String?
+  lucroDesejado      String?
+  mediaFaturamento   String?
+  custosAtivos       String?
+  observacoes        String?
+  userId             String
+  totalEncargosReais Float?        @default(0)
+  user               User          @relation(fields: [userId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  ativos             BlocoAtivos[]
+}
+
+model BlocoAtivos {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  blocoId   Int
+  bloco     Bloco    @relation(fields: [blocoId], references: [id])
+  ativos    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Produto {
+  id                  String                     @id @default(uuid())
+  codigo              String                     @unique
+  codBarras           String?
+  nome                String
+  categoria           String
+  marca               String[]
+  unidade             String
+  estoque             String
+  custo               String
+  ativo               Boolean
+  totalEmbalagem      String?
+  custoTotal          String?
+  custoUnitario       String?
+  estoqueMinimo       String?
+  imagem              String?
+  rotuloNutricional   Json?
+  entradasEstoque     EntradaEstoque[]
+  rotulosNutricionais ProdutoRotuloNutricional[]
+}
+
+model PreferenciaColunas {
+  userId  String @id
+  colunas String
+}
+
+model EntradaEstoque {
+  id         String  @id @default(uuid())
+  produtoId  String
+  produto    Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  quantidade Int
+  valor      Float?
+  lote       String?
+  data       String
+  userId     String
+  user       User    @relation(fields: [userId], references: [id])
+}
+
+model Fornecedor {
+  id           Int      @id @default(autoincrement())
+  razaoSocial  String
+  cnpjCpf      String
+  nomeVendedor String?
+  telefone     String
+  email        String?
+  endereco     String?
+  observacoes  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tempField    String?
+}
+
+model SaidaEstoque {
+  id         String    @id @default(uuid())
+  produtoId  String
+  quantidade Int
+  userId     String?
+  data       DateTime?
+}
+
+model CategoriaNutricional {
+  id                  String                     @id @default(uuid())
+  descricao           String
+  unidade             String
+  userId              String
+  user                User                       @relation(fields: [userId], references: [id])
+  rotulosNutricionais ProdutoRotuloNutricional[]
+}
+
+model ProdutoRotuloNutricional {
+  id                     String               @id @default(uuid())
+  produtoId              String
+  categoriaNutricionalId String
+  quantidade             String
+  vd                     String?
+  produto                Produto              @relation(fields: [produtoId], references: [id])
+  categoriaNutricional   CategoriaNutricional @relation(fields: [categoriaNutricionalId], references: [id])
+
+  @@unique([produtoId, categoriaNutricionalId])
+}
+
+model TipoProduto {
+  id        String   @id @default(uuid())
+  nome      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
