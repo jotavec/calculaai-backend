@@ -1,37 +1,46 @@
 // src/routes/uploadsReceita.js
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const auth = require('../middleware/auth');
+const salvarImagem = require('../util/salvarImagem'); // R2 (S3) uploader
 
 const router = express.Router();
 
-// Cria a pasta caso não exista
-const uploadDir = path.join(__dirname, '../../public/uploads/receitas');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configuração do multer para uploads na pasta public/uploads/receitas
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
+/**
+ * Multer em MEMÓRIA (buffer), sem gravar em disco local.
+ * Limite de 10MB por arquivo (ajuste se precisar).
+ * Filtra somente imagens comuns.
+ */
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const ok = /image\/(png|jpe?g|webp|gif)/i.test(file.mimetype);
+    if (!ok) return cb(new Error('Tipo de arquivo não suportado.'));
+    cb(null, true);
   },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `receita_${req.userId}_${Date.now()}${ext}`);
-  }
 });
 
-const upload = multer({ storage });
+/**
+ * POST /uploads/receita
+ * Campo do form-data: "file"
+ * Autenticado (usa req.userId do middleware)
+ * Retorna: { url: 'https://...r2.../arquivo.png' }
+ */
+router.post('/receita', auth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
-// Endpoint para upload da imagem da receita
-router.post('/receita', auth, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
-  // Caminho público
-  const fileUrl = `/uploads/receitas/${req.file.filename}`;
-  res.json({ url: fileUrl });
+    // monta um nome "amigável" só pra extensão (o util gera o nome final)
+    const originalName = req.file.originalname || `receita_${req.userId || 'anon'}.jpg`;
+    const url = await salvarImagem(req.file.buffer, originalName, req.file.mimetype);
+
+    return res.json({ url });
+  } catch (err) {
+    console.error('Erro no upload de receita:', err);
+    return res.status(500).json({ error: 'Falha ao enviar imagem.' });
+  }
 });
 
 module.exports = router;

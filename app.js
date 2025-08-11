@@ -54,7 +54,10 @@ const app = express();
 /* ==================== CORS ======================
  * Em produção, defina FRONTEND_ORIGIN no ambiente.
  */
-const allowedOrigins = ['http://localhost:5173'];
+const allowedOrigins = [
+  'http://localhost:5173',   // vite dev
+  'http://localhost:4173'    // vite preview
+];
 if (process.env.FRONTEND_ORIGIN) allowedOrigins.push(process.env.FRONTEND_ORIGIN);
 
 app.use(

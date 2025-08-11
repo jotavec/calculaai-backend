@@ -1,27 +1,45 @@
 // swagger.js
-const path = require('path');
+const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
-const swaggerJSDoc = require('swagger-jsdoc');
+
+const swaggerDefinition = {
+  openapi: '3.0.0',
+  info: {
+    title: 'CalculaAI API',
+    version: '1.0.0',
+    description: 'Documentação da API do CalculaAI (Precificador)',
+  },
+  // IMPORTANTÍSSIMO: base /api para todas as rotas
+  servers: [
+    { url: '/api', description: 'API base (local/Render)' },
+  ],
+  components: {
+    securitySchemes: {
+      // Usamos cookie httpOnly chamado "token"
+      cookieAuth: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'token',
+        description: 'JWT armazenado em cookie httpOnly',
+      },
+    },
+  },
+  // Deixa o cookieAuth aplicado por padrão
+  security: [{ cookieAuth: [] }],
+};
 
 const options = {
-  // A chave correta é "definition"
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'API Precificador',
-      version: '1.0.0',
-      description: 'CRUD de usuários com Prisma + Express',
-    },
-    // ajuda o Swagger UI a montar URLs relativas corretamente
-    servers: [{ url: '/' }],
-  },
-  // IMPORTANTÍSSIMO: usar caminhos absolutos e UMA única chave `apis`
+  definition: swaggerDefinition,
+  // Varre app.js e TODAS as rotas em src/routes
   apis: [
-    path.join(__dirname, 'app.js'),
-    path.join(__dirname, 'src', '**', '*.js'),
+    './app.js',
+    './src/routes/**/*.js',
   ],
 };
 
-const swaggerSpec = swaggerJSDoc(options);
+const swaggerSpec = swaggerJsdoc(options);
 
-module.exports = { swaggerUi, swaggerSpec };
+module.exports = {
+  swaggerUi,
+  swaggerSpec,
+};

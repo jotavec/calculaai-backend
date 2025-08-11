@@ -262,7 +262,6 @@ const router = express.Router();
  *       200: { description: OK }
  */
 
-
 router.get("/debug-existe", (req, res) => {
   res.send({ ok: true });
 });
@@ -327,16 +326,18 @@ router.post("/", async (req, res) => {
     // Gera token JWT
     const token = jwt.sign({ userId: newUser.id }, SECRET, { expiresIn: "7d" });
 
-    // Seta o token como cookie httpOnly seguro
+    // Cookie cross-site (frontend localhost -> backend Render)
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,        // Render é HTTPS
+      sameSite: 'none',    // necessário p/ enviar cookie cross-site
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.status(201).json({
       message: "Usuário cadastrado!",
+      token, // <- ADICIONADO
       user: {
         id: newUser.id,
         email: newUser.email,
@@ -370,15 +371,20 @@ router.post("/login", async (req, res) => {
     // Gera o token com o id do usuário
     const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "7d" });
 
-    // Seta o token como cookie httpOnly seguro
+    // Cookie cross-site (frontend localhost -> backend Render)
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,        // Render é HTTPS
+      sameSite: 'none',    // necessário p/ enviar cookie cross-site
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    res.json({ user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || "" } });
+    // <- ADICIONADO: também devolve o token no JSON
+    res.json({ 
+      token,
+      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || "" } 
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Erro no login." });
@@ -413,7 +419,6 @@ router.put("/me", authMiddleware, async (req, res) => {
     const userId = req.userId;
     const { name, email, cpf, telefone } = req.body;
 
-    // Atualiza apenas os campos permitidos
     const updated = await prisma.user.update({
       where: { id: userId },
       data: { name, email, cpf, telefone },
@@ -439,7 +444,6 @@ router.post('/me/avatar', authMiddleware, upload.single('avatar'), async (req, r
     const userId = req.userId;
     const avatarPath = `/uploads/avatars/${req.file.filename}`;
 
-    // Salva caminho no banco
     await prisma.user.update({
       where: { id: userId },
       data: { avatarUrl: avatarPath }
@@ -475,9 +479,8 @@ router.post("/change-password", authMiddleware, async (req, res) => {
   }
 });
 
-// ========== OUTRAS ROTAS, CASO PRECISE ==========
+// ========== OUTRAS ROTAS ==========
 router.get("/", authMiddleware, async (req, res) => {
-  // Exemplo: lista todos usuários
   try {
     const users = await prisma.user.findMany({
       select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true }
@@ -488,7 +491,6 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 router.put("/:id", authMiddleware, async (req, res) => {
-  // Update de qualquer usuário pelo ID
   try {
     const { id } = req.params;
     const { name, email, cpf, telefone } = req.body;
@@ -534,15 +536,14 @@ router.get("/:id", authMiddleware, async (req, res) => {
 router.post("/logout", (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
+    secure: true,
+    sameSite: 'none',
+    path: '/'
   });
   res.json({ message: "Logout realizado!" });
 });
 
 // ==================== FILTRO DE MÉDIA DE FATURAMENTO ====================
-
-// GET - buscar o filtro de média de faturamento do usuário
 router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     console.log('ID recebido no filtro-faturamento:', req.userId);
@@ -559,8 +560,6 @@ router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   }
 });
 
-
-// POST - salvar filtro de média de faturamento do usuário
 router.post("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     const { filtro } = req.body;
