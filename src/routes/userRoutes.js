@@ -19,6 +19,10 @@ const router = express.Router();
  *       type: apiKey
  *       in: cookie
  *       name: token
+ *     bearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
  *   schemas:
  *     User:
  *       type: object
@@ -95,7 +99,9 @@ const router = express.Router();
  *                 message: { type: string }
  *                 user: { $ref: '#/components/schemas/User' }
  *   get:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Listar usuários (protegido)
  *     responses:
@@ -113,7 +119,7 @@ const router = express.Router();
  * /users/login:
  *   post:
  *     tags: [Users]
- *     summary: Login (define cookie httpOnly)
+ *     summary: Login (define cookie httpOnly e também retorna token no JSON)
  *     requestBody:
  *       required: true
  *       content:
@@ -138,7 +144,9 @@ const router = express.Router();
  * @swagger
  * /users/me:
  *   get:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Dados do usuário logado
  *     responses:
@@ -148,7 +156,9 @@ const router = express.Router();
  *           application/json:
  *             schema: { $ref: '#/components/schemas/User' }
  *   put:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Atualiza perfil do usuário logado
  *     requestBody:
@@ -161,14 +171,17 @@ const router = express.Router();
  *         description: Usuário atualizado
  *         content:
  *           application/json:
- *             schema: { $ref: '#/components/schemas/User' }
+ *             schema:
+ *               $ref: '#/components/schemas/User'
  */
 
 /**
  * @swagger
  * /users/me/avatar:
  *   post:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Upload de avatar do usuário logado
  *     requestBody:
@@ -190,7 +203,9 @@ const router = express.Router();
  * @swagger
  * /users/change-password:
  *   post:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Trocar senha
  *     requestBody:
@@ -206,7 +221,9 @@ const router = express.Router();
  * @swagger
  * /users/{id}:
  *   get:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Buscar usuário por ID
  *     parameters:
@@ -221,7 +238,9 @@ const router = express.Router();
  *           application/json:
  *             schema: { $ref: '#/components/schemas/User' }
  *   put:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Atualizar usuário por ID
  *     parameters:
@@ -243,14 +262,18 @@ const router = express.Router();
  * @swagger
  * /users/filtro-faturamento:
  *   get:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Busca filtro de média de faturamento do usuário
  *     responses:
  *       200:
  *         description: Filtro atual
  *   post:
- *     security: [ { cookieAuth: [] } ]
+ *     security:
+ *       - cookieAuth: []
+ *       - bearerAuth: []
  *     tags: [Users]
  *     summary: Salva filtro de média de faturamento
  *     requestBody:
@@ -267,77 +290,89 @@ router.get("/debug-existe", (req, res) => {
 });
 
 const prisma = new PrismaClient();
-
 const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 
-// ===== Multer setup para upload de avatar =====
+/* ---------- Multer (avatar) ---------- */
 const avatarsDir = path.join(__dirname, '../../uploads/avatars');
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir, { recursive: true });
 }
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, avatarsDir);
-  },
+  destination: (_req, _file, cb) => cb(null, avatarsDir),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".png";
+    const ext = (path.extname(file.originalname) || ".png").toLowerCase();
     cb(null, `${req.userId}${ext}`);
   }
 });
 const upload = multer({ storage });
 
-// Servir estático os arquivos de avatar (acessa via /uploads/avatars/nome.png)
-router.use('/uploads/avatars', express.static(avatarsDir));
+/* ---------- helpers ---------- */
+function extractTokenFromAuthHeader(req) {
+  const auth = req.headers?.authorization || req.headers?.Authorization;
+  if (!auth) return null;
+  const parts = String(auth).split(' ');
+  if (parts.length === 2 && /^Bearer$/i.test(parts[0])) return parts[1];
+  return null;
+}
 
-// ===== Middleware para autenticação =====
 function authMiddleware(req, res, next) {
-  const token = req.cookies.token;
+  let token = extractTokenFromAuthHeader(req);
+  if (!token && req.cookies) token = req.cookies.token;
   if (!token) return res.status(401).json({ error: "Token não fornecido." });
 
   try {
     const decoded = jwt.verify(token, SECRET);
     req.userId = decoded.userId;
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: "Token inválido." });
   }
 }
 
-// ========== CADASTRAR USUÁRIO ==========
+// normaliza para algo como: /uploads/avatars/xxx.png
+function toPublicUploadsPath(p) {
+  if (!p) return '';
+  let rel = String(p).replace(/\\/g, '/');
+  rel = rel.replace(/^public\//, ''); // caso tenha vindo 'public/uploads/...'
+  if (!rel.startsWith('uploads/')) {
+    const i = rel.indexOf('uploads/');
+    if (i >= 0) rel = rel.slice(i);
+  }
+  if (!rel.startsWith('/')) rel = '/' + rel;
+  return rel;
+}
+
+/* ---------- rotas ---------- */
+
+// cadastro
 router.post("/", async (req, res) => {
   const { name, email, password, cpf, telefone } = req.body;
-
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Preencha todos os campos." });
   }
 
   try {
     const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ error: "Email já cadastrado." });
-    }
+    if (existingUser) return res.status(400).json({ error: "Email já cadastrado." });
 
     const passwordHash = await bcrypt.hash(password, 10);
-
     const newUser = await prisma.user.create({
       data: { name, email, passwordHash, cpf, telefone },
     });
 
-    // Gera token JWT
     const token = jwt.sign({ userId: newUser.id }, SECRET, { expiresIn: "7d" });
 
-    // Cookie cross-site (frontend localhost -> backend Render)
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,        // Render é HTTPS
-      sameSite: 'none',    // necessário p/ enviar cookie cross-site
+      secure: true,
+      sameSite: 'none',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.status(201).json({
       message: "Usuário cadastrado!",
-      token, // <- ADICIONADO
+      token,
       user: {
         id: newUser.id,
         email: newUser.email,
@@ -353,37 +388,31 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ========== LOGIN ==========
+// login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password)
-    return res.status(400).json({ error: "Email e senha obrigatórios." });
+  if (!email || !password) return res.status(400).json({ error: "Email e senha obrigatórios." });
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user)
-      return res.status(401).json({ error: "Usuário ou senha inválidos." });
+    if (!user) return res.status(401).json({ error: "Usuário ou senha inválidos." });
 
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid)
-      return res.status(401).json({ error: "Usuário ou senha inválidos." });
+    if (!valid) return res.status(401).json({ error: "Usuário ou senha inválidos." });
 
-    // Gera o token com o id do usuário
     const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "7d" });
 
-    // Cookie cross-site (frontend localhost -> backend Render)
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,        // Render é HTTPS
-      sameSite: 'none',    // necessário p/ enviar cookie cross-site
+      secure: true,
+      sameSite: 'none',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    // <- ADICIONADO: também devolve o token no JSON
-    res.json({ 
+    res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || "" } 
+      user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl || "" }
     });
   } catch (error) {
     console.error(error);
@@ -391,19 +420,12 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ========== ROTA GET /me ==========
+// me
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        cpf: true,
-        telefone: true,
-        avatarUrl: true,
-      },
+      select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json(user);
@@ -413,7 +435,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// ========== ROTA PUT /me ==========
+// atualizar perfil
 router.put("/me", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -422,14 +444,7 @@ router.put("/me", authMiddleware, async (req, res) => {
     const updated = await prisma.user.update({
       where: { id: userId },
       data: { name, email, cpf, telefone },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        cpf: true,
-        telefone: true,
-        avatarUrl: true,
-      }
+      select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true }
     });
     res.json(updated);
   } catch (error) {
@@ -438,25 +453,40 @@ router.put("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// ========== ROTA DE UPLOAD DE AVATAR ==========
+// upload avatar
 router.post('/me/avatar', authMiddleware, upload.single('avatar'), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Arquivo não enviado.' });
+    }
+
     const userId = req.userId;
-    const avatarPath = `/uploads/avatars/${req.file.filename}`;
+
+    // Remove arquivos antigos de outras extensões (se existirem)
+    const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+    for (const e of exts) {
+      const f = path.join(avatarsDir, `${userId}${e}`);
+      if (fs.existsSync(f) && f !== req.file.path) {
+        try { fs.unlinkSync(f); } catch (_) {}
+      }
+    }
+
+    // Caminho público que o front vai usar
+    const avatarPathPublic = toPublicUploadsPath(`uploads/avatars/${req.file.filename}`);
 
     await prisma.user.update({
       where: { id: userId },
-      data: { avatarUrl: avatarPath }
+      data: { avatarUrl: avatarPathPublic }
     });
 
-    res.json({ ok: true, avatarUrl: avatarPath });
+    res.json({ ok: true, avatarUrl: avatarPathPublic });
   } catch (error) {
-    console.error(error);
+    console.error('[avatar upload]', error);
     res.status(500).json({ error: 'Erro ao salvar avatar.' });
   }
 });
 
-// ========== TROCA DE SENHA ==========
+// troca de senha
 router.post("/change-password", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -467,29 +497,27 @@ router.post("/change-password", authMiddleware, async (req, res) => {
     }
 
     const senhaHash = await bcrypt.hash(senhaNova, 10);
-
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash: senhaHash }
-    });
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash: senhaHash } });
 
     res.json({ ok: true, message: "Senha alterada com sucesso!" });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Erro ao alterar senha." });
   }
 });
 
-// ========== OUTRAS ROTAS ==========
-router.get("/", authMiddleware, async (req, res) => {
+// listagem
+router.get("/", authMiddleware, async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
       select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true }
     });
     res.json(users);
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: "Erro ao buscar usuários." });
   }
 });
+
+// update por id
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -497,63 +525,43 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { id: String(id) },
       data: { name, email, cpf, telefone },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        cpf: true,
-        telefone: true,
-        avatarUrl: true,
-      }
+      select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true }
     });
     res.json(updatedUser);
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: "Erro ao atualizar usuário." });
   }
 });
+
+// buscar por id
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const user = await prisma.user.findUnique({
       where: { id: String(id) },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        cpf: true,
-        telefone: true,
-        avatarUrl: true,
-      }
+      select: { id: true, name: true, email: true, cpf: true, telefone: true, avatarUrl: true }
     });
     if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
     res.json(user);
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: "Erro ao buscar usuário." });
   }
 });
 
-// ========== LOGOUT ==========
+// logout
 router.post("/logout", (req, res) => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/'
-  });
+  res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none', path: '/' });
   res.json({ message: "Logout realizado!" });
 });
 
-// ==================== FILTRO DE MÉDIA DE FATURAMENTO ====================
+// filtro de média de faturamento
 router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
-    console.log('ID recebido no filtro-faturamento:', req.userId);
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
       select: { filtroFaturamentoMediaTipo: true }
     });
-    if (!user) {
-      return res.status(404).json({ error: "Usuário não encontrado." });
-    }
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
     res.json({ filtro: user.filtroFaturamentoMediaTipo || "6" });
   } catch {
     res.status(500).json({ error: "Erro ao buscar filtro" });

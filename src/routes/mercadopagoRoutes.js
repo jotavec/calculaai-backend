@@ -1,66 +1,42 @@
 // src/routes/mercadopagoRoutes.js
 const express = require("express");
-const axios = require("axios");
+const auth = require("../middleware/auth");
+
 const router = express.Router();
 
-const ACCESS_TOKEN = process.env.MERCADOPAGO_ACCESS_TOKEN;
+const BACK_URL = process.env.MP_RETURN_URL; // já está no .env
 
-if (!ACCESS_TOKEN) {
-  console.warn("[MercadoPago] MERCADOPAGO_ACCESS_TOKEN não definido no .env");
+if (!BACK_URL) {
+  console.warn("[MP] MP_RETURN_URL ausente no .env");
 }
 
 /**
- * Devolve o init_point de um preapproval_plan (plano de assinatura).
- * Request:  POST /api/mercadopago/criar-assinatura
- * Body:     { planoId: string }
- * Response: { init_point, plan: { id, reason, amount, currency, frequency, frequency_type } }
- *
- * Observação:
- *  - Não exigimos cartão no back. O cliente finaliza o pagamento no checkout do Mercado Pago.
+ * POST /api/mercadopago/criar-assinatura
+ * body: { email: string, planoId: string }
+ * -> retorna { url } para redirecionar ao checkout hospedado do Mercado Pago
  */
-router.post("/criar-assinatura", async (req, res) => {
+router.post("/criar-assinatura", auth, async (req, res) => {
   try {
-    const { planoId } = req.body;
+    const { email, planoId } = req.body;
 
     if (!planoId) {
-      return res.status(400).json({ error: "Campo obrigatório: planoId" });
+      return res.status(400).json({ error: "planoId é obrigatório" });
     }
 
-    // Busca os dados do plano para pegar o init_point
-    const { data: plan } = await axios.get(
-      `https://api.mercadopago.com/preapproval_plan/${encodeURIComponent(planoId)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${ACCESS_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    // URL do checkout de assinaturas do Mercado Pago (Brasil)
+    const base = "https://www.mercadopago.com.br/subscriptions/checkout";
 
-    // init_point normalmente vem no objeto do plano
-    const initPoint = plan.init_point;
+    const qs = new URLSearchParams({
+      preapproval_plan_id: planoId,
+      back_url: BACK_URL,             // para onde o MP retorna após o fluxo
+      ...(email ? { payer_email: email } : {}) // opcional, pré-preenche o e-mail
+    });
 
-    if (!initPoint) {
-      return res.status(500).json({
-        error: "init_point não retornado pelo Mercado Pago para este plano.",
-      });
-    }
-
-    // Dados úteis para o front
-    const info = {
-      id: plan.id,
-      reason: plan.reason,
-      amount: plan.auto_recurring?.transaction_amount,
-      currency: plan.auto_recurring?.currency_id,
-      frequency: plan.auto_recurring?.frequency,
-      frequency_type: plan.auto_recurring?.frequency_type,
-    };
-
-    return res.json({ init_point: initPoint, plan: info });
-  } catch (error) {
-    const payload = error.response?.data || { message: error.message };
-    console.error("[MP criar-assinatura via plano] Erro:", payload);
-    res.status(500).json({ error: payload });
+    const url = `${base}?${qs.toString()}`;
+    return res.json({ url });
+  } catch (err) {
+    console.error("[MP checkout assinatura] erro:", err);
+    return res.status(500).json({ error: "Falha ao gerar URL de checkout" });
   }
 });
 

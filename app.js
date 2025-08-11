@@ -70,11 +70,22 @@ app.use(
 
 /**
  * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
- * 1) public/uploads  -> uploads de receitas
- * 2) uploads         -> legado (avatars etc)
+ * Mantemos os DOIS diretórios:
+ * 1) public/uploads      -> uploads de receitas (ex.: imagens de receitas)
+ * 2) uploads             -> legado (ex.: avatars)
+ * E criamos aliases explícitos para evitar confusão:
+ *   - /uploads/receitas  -> public/uploads/receitas
+ *   - /uploads/avatars   -> uploads/avatars
  */
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const uploadsPublic = path.join(__dirname, 'public', 'uploads');
+const uploadsLegacy = path.join(__dirname, 'uploads');
+
+app.use('/uploads', express.static(uploadsPublic, { maxAge: '1d', fallthrough: true }));
+app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
+
+// Aliases explícitos (opcionais, mas ajudam a manter a separação clara)
+app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
+app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
 
 // Parsers
 app.use(express.json({ limit: '20mb' }));
@@ -97,7 +108,7 @@ app.use('/api/despesasfixas', despesasFixasRoutes);
 app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/encargos-sobre-venda', encargosSobreVendaRoutes);
-app.use('/api/filtro-faturamento', filtroFaturamentoRoutes);
+app.use('/api', filtroFaturamentoRoutes);
 app.use('/api/markup-ideal', markupIdealRoutes);
 app.use('/api/bloco-ativos', blocoAtivosRoutes);
 app.use('/api/produtos', produtosRoutes);
