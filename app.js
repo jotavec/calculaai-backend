@@ -52,20 +52,45 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 const app = express();
 
 /* ==================== CORS ======================
- * Em produção, defina FRONTEND_ORIGIN no ambiente.
+ * Em produção, defina FRONTEND_ORIGIN (e _2, _3 se precisar).
+ * Em desenvolvimento, liberamos as portas locais usadas (Vite e build).
  */
-const allowedOrigins = [
-  'http://localhost:5173',   // vite dev
-  'http://localhost:4173'    // vite preview
+const STATIC_ALLOWED = [
+  'http://localhost:5173',   // Vite dev
+  'http://localhost:4173',   // Vite preview
+  'http://localhost:60378',  // build servido por "serve -s dist"
 ];
-if (process.env.FRONTEND_ORIGIN) allowedOrigins.push(process.env.FRONTEND_ORIGIN);
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  })
-);
+const ENV_ALLOWED = [
+  process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_ORIGIN_2,
+  process.env.FRONTEND_ORIGIN_3,
+].filter(Boolean);
+
+const allowedList = new Set([...STATIC_ALLOWED, ...ENV_ALLOWED]);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Requests sem origin (ex.: Postman) — permite
+    if (!origin) return callback(null, true);
+
+    // Lista explícita
+    if (allowedList.has(origin)) return callback(null, true);
+
+    // Previews do Vercel (*.vercel.app) — opcional, facilita testes
+    if (/^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)) {
+      return callback(null, true);
+    }
+
+    // Caso queira liberar temporariamente TUDO durante testes, descomente:
+    // return callback(null, true);
+
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 /* =============================================== */
 
 /**
