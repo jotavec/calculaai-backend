@@ -6,13 +6,101 @@ const prisma = new PrismaClient();
 const path = require('path');
 const fs = require('fs');
 
+// -----------------------------------------------------
+// Swagger Schemas deste módulo
+// -----------------------------------------------------
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Bloco:
+ *       type: object
+ *       properties:
+ *         id: { type: integer, example: 1 }
+ *         nome: { type: string, example: "Pizzaria - Delivery" }
+ *         markup: { type: string, nullable: true, example: "2.1" }
+ *         markupIdeal: { type: string, nullable: true, example: "2.4" }
+ *         gastosFaturamento: { type: string, nullable: true, example: "3.5" }
+ *         impostos: { type: string, nullable: true, example: "6.0" }
+ *         taxasPagamento: { type: string, nullable: true, example: "2.2" }
+ *         comissoes: { type: string, nullable: true, example: "1.0" }
+ *         outros: { type: string, nullable: true, example: "0.5" }
+ *         lucroDesejado: { type: string, nullable: true, example: "15" }
+ *         mediaFaturamento: { type: string, nullable: true, example: "35000" }
+ *         custosAtivos:
+ *           type: string
+ *           nullable: true
+ *           description: JSON serializado com os custos ativos do bloco
+ *           example: "{\"energia\":1200,\"aluguel\":2500}"
+ *         observacoes: { type: string, nullable: true, example: "Usar para linha de pizza premium" }
+ *         totalEncargosReais:
+ *           type: number
+ *           format: float
+ *           example: 1234.56
+ *         userId: { type: string, example: "d0b0491e-1261-4381-9626-6f6ccfc7629e" }
+ *         createdAt: { type: string, format: date-time }
+ *         updatedAt: { type: string, format: date-time }
+ *
+ *     BlocoInput:
+ *       type: object
+ *       properties:
+ *         nome: { type: string }
+ *         markup: { type: string, nullable: true }
+ *         markupIdeal: { type: string, nullable: true }
+ *         gastosFaturamento: { type: string, nullable: true }
+ *         impostos: { type: string, nullable: true }
+ *         taxasPagamento: { type: string, nullable: true }
+ *         comissoes: { type: string, nullable: true }
+ *         outros: { type: string, nullable: true }
+ *         lucroDesejado: { type: string, nullable: true }
+ *         mediaFaturamento: { type: string, nullable: true }
+ *         custosAtivos:
+ *           oneOf:
+ *             - type: object
+ *             - type: string
+ *           description: Pode vir objeto (no front) ou string JSON; será salvo como string
+ *         observacoes: { type: string, nullable: true }
+ *         totalEncargosReais:
+ *           type: number
+ *           format: float
+ *           nullable: true
+ */
+
 // Função utilitária para garantir string numérica (nunca vazia)
 function safeNumString(val) {
   if (val === undefined || val === null || val === "") return "0";
   return String(Number(val));
 }
 
-// Criar um novo bloco (agora limitado por plano)
+// -----------------------------------------------------
+// Criar um novo bloco (limitado por plano)
+// -----------------------------------------------------
+/**
+ * @swagger
+ * /markup-ideal:
+ *   post:
+ *     tags: [MarkupIdeal]
+ *     summary: Cria um novo bloco de markup (respeita limite por plano do usuário)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BlocoInput'
+ *     responses:
+ *       201:
+ *         description: Bloco criado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Bloco'
+ *       403:
+ *         description: Limite do plano atingido
+ *       500:
+ *         description: Erro ao criar bloco
+ */
 router.post('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -81,7 +169,29 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Listar todos os blocos do usuário logado (com espião)
+// -----------------------------------------------------
+// Listar todos os blocos do usuário logado
+// -----------------------------------------------------
+/**
+ * @swagger
+ * /markup-ideal:
+ *   get:
+ *     tags: [MarkupIdeal]
+ *     summary: Lista todos os blocos de markup do usuário autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de blocos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Bloco'
+ *       500:
+ *         description: Erro ao buscar blocos
+ */
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -102,7 +212,41 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Atualizar o markup do bloco (por ID, com log detalhado!)
+// -----------------------------------------------------
+// Atualizar um bloco por ID
+// -----------------------------------------------------
+/**
+ * @swagger
+ * /markup-ideal/{id}:
+ *   put:
+ *     tags: [MarkupIdeal]
+ *     summary: Atualiza um bloco de markup por ID (apenas do usuário autenticado)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: ID do bloco
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BlocoInput'
+ *     responses:
+ *       200:
+ *         description: Bloco atualizado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Bloco'
+ *       403:
+ *         description: Acesso negado ou bloco não encontrado
+ *       500:
+ *         description: Erro ao atualizar bloco
+ */
 router.put('/:id', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -164,7 +308,31 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// Deletar um bloco (apenas se for do usuário)
+// -----------------------------------------------------
+// Deletar um bloco
+// -----------------------------------------------------
+/**
+ * @swagger
+ * /markup-ideal/{id}:
+ *   delete:
+ *     tags: [MarkupIdeal]
+ *     summary: Remove um bloco de markup por ID (apenas do usuário autenticado)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: ID do bloco
+ *     responses:
+ *       204:
+ *         description: Deletado com sucesso (sem conteúdo)
+ *       403:
+ *         description: Acesso negado ou bloco não encontrado
+ *       500:
+ *         description: Erro ao deletar bloco
+ */
 router.delete('/:id', auth, async (req, res) => {
   try {
     const userId = req.userId;
