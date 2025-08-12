@@ -14,6 +14,9 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
+// Domínio do cookie (use env COOKIE_DOMAIN se quiser alterar)
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || ".onrender.com";
+
 // ====== Opções do cookie de sessão (cross-site) ======
 const cookieOpts = {
   httpOnly: true,
@@ -21,6 +24,7 @@ const cookieOpts = {
   sameSite: "none",     // permite envio entre domínios (vercel.app -> onrender.com)
   path: "/",
   maxAge: TOKEN_TTL_MS,
+  domain: COOKIE_DOMAIN // garante que o cookie pertença ao domínio do backend
 };
 
 /**
@@ -356,7 +360,7 @@ router.post("/filtro-faturamento", authMiddleware, async (req, res) => {
       where: { id: req.userId },
       data: { filtroFaturamentoMediaTipo: filtro },
     });
-    res.json({ ok: true });
+  res.json({ ok: true });
   } catch (error) {
     console.error("[POST filtro-faturamento]", error);
     res.status(500).json({ error: "Erro ao salvar filtro" });
