@@ -14,20 +14,17 @@ const {
 } = require("@aws-sdk/client-s3");
 
 const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex: https://<accountid>.r2.cloudflarestorage.com
-const R2_BUCKET = process.env.R2_BUCKET;     // ex: calculaai-uploads
+const R2_BUCKET = process.env.R2_BUCKET; // ex: calculaai-uploads
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-// Garante que tenha UMA única barra ao final (para concatenar com a key)
-const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "")
-  .replace(/\/+$/, "") // tira barras do fim
-  || "";               // pode ficar vazio (usamos fallback)
+const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, ""); // sem barra no fim
 
 const s3 =
   R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
     ? new S3Client({
         region: "auto",
         endpoint: R2_ENDPOINT,
-        forcePathStyle: true, // R2 exige path-style
+        forcePathStyle: true,
         credentials: {
           accessKeyId: R2_ACCESS_KEY_ID,
           secretAccessKey: R2_SECRET_ACCESS_KEY,
@@ -115,14 +112,10 @@ const cookieOpts = {
 router.get("/debug-existe", (_req, res) => res.send({ ok: true }));
 
 /* ---------- Multer (avatar em MEMÓRIA) ---------- */
-// Aceita só imagens e limita a 5MB
+// Limite de 5MB por avatar (ajuste se quiser)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ok = /^image\/(png|jpe?g|webp|gif|bmp)$/i.test(file.mimetype);
-    cb(ok ? null : new Error("Arquivo inválido: envie uma imagem"), ok);
-  },
 });
 
 /* ---------- helpers ---------- */
@@ -154,44 +147,14 @@ function sanitizeUser(u) {
   return rest;
 }
 
-// Remove query/hash e extrai a key do R2 a partir da URL pública
+// Dado um avatarUrl antigo, se for do R2, extrai a chave (Key) relativa ao bucket
 function keyFromPublicUrl(url) {
-  if (!url) return null;
-  let normalized = String(url).trim();
-  // remove query/hash
-  normalized = normalized.split("#")[0].split("?")[0];
-  if (R2_PUBLIC_URL_PREFIX && normalized.startsWith(R2_PUBLIC_URL_PREFIX)) {
-    let key = normalized.slice(R2_PUBLIC_URL_PREFIX.length);
-    return key.replace(/^\/+/, "") || null;
-  }
-  // fallback: tenta /<bucket>/<key> a partir do endpoint
-  if (R2_ENDPOINT && normalized.startsWith(R2_ENDPOINT)) {
-    let rest = normalized.slice(R2_ENDPOINT.length).replace(/^\/+/, ""); // bucket/key
-    const idx = rest.indexOf("/");
-    if (idx > 0) return rest.slice(idx + 1);
-  }
-  return null;
-}
-
-function buildPublicUrl(key) {
-  const k = String(key).replace(/^\/+/, "");
-  if (R2_PUBLIC_URL_PREFIX) {
-    return `${R2_PUBLIC_URL_PREFIX}/${k}`;
-  }
-  // fallback
-  const base = R2_ENDPOINT?.replace(/\/+$/, "") || "";
-  return `${base}/${R2_BUCKET}/${k}`;
-}
-
-function pickExt({ originalname, mimetype }) {
-  const extFromName = (path.extname(originalname || "") || "").toLowerCase();
-  if (extFromName && extFromName.length <= 6) return extFromName;
-  if (/png/i.test(mimetype)) return ".png";
-  if (/webp/i.test(mimetype)) return ".webp";
-  if (/jpe?g/i.test(mimetype)) return ".jpg";
-  if (/gif/i.test(mimetype)) return ".gif";
-  if (/bmp/i.test(mimetype)) return ".bmp";
-  return ".png";
+  if (!url || !R2_PUBLIC_URL_PREFIX) return null;
+  const normalized = String(url).trim();
+  if (!normalized.startsWith(R2_PUBLIC_URL_PREFIX)) return null;
+  let key = normalized.slice(R2_PUBLIC_URL_PREFIX.length);
+  key = key.replace(/^\/+/, "");
+  return key || null;
 }
 
 /* ---------- rotas ---------- */
@@ -289,9 +252,10 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
     const userId = req.userId;
     const file = req.file;
 
-    const ext = pickExt({ originalname: file.originalname, mimetype: file.mimetype });
+    const originalExt = (path.extname(file.originalname) || "").toLowerCase();
+    const ext = originalExt && originalExt.length <= 6 ? originalExt : ".png";
 
-    // Ex: avatars/<userId>/<timestamp>.ext — sobreescrevemos por usuário e limpamos o antigo
+    // Ex: avatars/<userId>/<timestamp>.png
     const key = `avatars/${userId}/${Date.now()}${ext}`;
 
     // Envia para o R2
@@ -319,22 +283,20 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
       }
     }
 
-    // Monta URL pública e persiste
-    const publicUrl = buildPublicUrl(key);
+    // Monta URL pública
+    const publicUrl = R2_PUBLIC_URL_PREFIX
+      ? `${R2_PUBLIC_URL_PREFIX}/${key}`
+      : `${R2_ENDPOINT}/${R2_BUCKET}/${key}`; // fallback (recomendo sempre usar o prefixo público)
 
     await prisma.user.update({
       where: { id: userId },
       data: { avatarUrl: publicUrl },
     });
 
-    // devolve a URL (o front pode aplicar cache-buster se quiser)
     return res.json({ ok: true, avatarUrl: publicUrl });
   } catch (error) {
     console.error("[avatar upload R2]", error);
-    const message = /File too large/i.test(error?.message)
-      ? "Arquivo muito grande (máx. 5MB)."
-      : "Erro ao salvar avatar.";
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: "Erro ao salvar avatar." });
   }
 });
 
