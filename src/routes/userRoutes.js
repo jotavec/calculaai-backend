@@ -19,6 +19,7 @@ const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, "");
 
+// cria client do R2 se tudo estiver configurado
 const s3 =
   R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
     ? new S3Client({
@@ -39,12 +40,19 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
+// ====== COOKIES EM PRODUÇÃO ======
+// Você disse que NÃO usa local. Então já travamos em produção:
+// - secure: true (HTTPS)
+// - sameSite: "none" (cross-site com frontend em outro domínio)
+// Opcional: ajustar domínio fixo com COOKIE_DOMAIN (ex: .seu-dominio.com)
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim();
 const cookieOpts = {
   httpOnly: true,
   secure: true,
   sameSite: "none",
   path: "/",
   maxAge: TOKEN_TTL_MS,
+  ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
 };
 
 /**
@@ -156,7 +164,7 @@ function keyFromPublicUrl(url) {
 
 // ---------- Rotas ----------
 
-// Cadastro
+// Cadastro (inclui cpf/telefone)
 router.post("/", async (req, res) => {
   const { name, email, password, cpf, telefone } = req.body || {};
   if (!name || !email || !password) {
@@ -186,7 +194,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Login
+// Login (suporta passwordHash ou 'senha' legado)
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email e senha obrigatórios." });
@@ -224,7 +232,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// Atualizar perfil
+// Atualizar perfil do próprio usuário
 router.put("/me", authMiddleware, async (req, res) => {
   try {
     const { name, email, cpf, telefone } = req.body || {};
@@ -264,6 +272,7 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
       })
     );
 
+    // apaga o avatar anterior, se houver
     const current = await prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },
@@ -309,7 +318,7 @@ router.post("/change-password", authMiddleware, async (req, res) => {
   }
 });
 
-// Listagem
+// Listagem (inclui cpf/telefone)
 router.get("/", authMiddleware, async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -322,7 +331,7 @@ router.get("/", authMiddleware, async (_req, res) => {
   }
 });
 
-// Update por id
+// Update por id (adm ou rotas internas)
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -361,7 +370,7 @@ router.post("/logout", (_req, res) => {
   res.json({ message: "Logout realizado!" });
 });
 
-// Filtro faturamento
+// Filtro faturamento (get/save)
 router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
