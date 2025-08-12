@@ -5,7 +5,6 @@ const bcrypt = require("bcrypt");
 const { PrismaClient } = require("@prisma/client");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
 
 // ---- S3 (Cloudflare R2) ----
 const {
@@ -148,13 +147,13 @@ function sanitizeUser(u) {
   return rest;
 }
 
-// Dado um avatarUrl antigo, se for do R2, extrai a chave (Key)
+// Dado um avatarUrl antigo, se for do R2, extrai a chave (Key) relativa ao bucket
 function keyFromPublicUrl(url) {
   if (!url || !R2_PUBLIC_URL_PREFIX) return null;
   const normalized = String(url).trim();
   if (!normalized.startsWith(R2_PUBLIC_URL_PREFIX)) return null;
   let key = normalized.slice(R2_PUBLIC_URL_PREFIX.length);
-  key = key.replace(/^\/+/, ""); // remove barra inicial
+  key = key.replace(/^\/+/, "");
   return key || null;
 }
 
@@ -254,10 +253,9 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
     const file = req.file;
 
     const originalExt = (path.extname(file.originalname) || "").toLowerCase();
-    // default para .png se não vier extensão
     const ext = originalExt && originalExt.length <= 6 ? originalExt : ".png";
 
-    // Ex: avatars/USERID/1690000000000.png
+    // Ex: avatars/<userId>/<timestamp>.png
     const key = `avatars/${userId}/${Date.now()}${ext}`;
 
     // Envia para o R2
@@ -267,30 +265,28 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype || "application/octet-stream",
-        // ACL não é usado no R2; a URL pública virá do R2_PUBLIC_URL_PREFIX
+        CacheControl: "public, max-age=31536000, immutable",
       })
     );
 
-    // Apaga o avatar antigo (se já existia e for do mesmo R2)
+    // Apaga o avatar antigo (se existia e era do mesmo R2)
     const current = await prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },
     });
-
     const oldKey = keyFromPublicUrl(current?.avatarUrl);
     if (oldKey) {
       try {
         await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: oldKey }));
       } catch (_) {
-        // silencioso — não queremos quebrar upload se falhar delete do antigo
+        // silencioso — não falha o upload se não conseguiu deletar o antigo
       }
     }
 
     // Monta URL pública
     const publicUrl = R2_PUBLIC_URL_PREFIX
       ? `${R2_PUBLIC_URL_PREFIX}/${key}`
-      : // fallback (não recomendado em produção; ideal é sempre usar R2_PUBLIC_URL_PREFIX)
-        `${R2_ENDPOINT.replace("https://", "https://")}/${R2_BUCKET}/${key}`;
+      : `${R2_ENDPOINT}/${R2_BUCKET}/${key}`; // fallback (recomendo sempre usar o prefixo público)
 
     await prisma.user.update({
       where: { id: userId },
