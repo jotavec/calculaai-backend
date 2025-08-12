@@ -4,7 +4,69 @@ const auth = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// BUSCAR ATIVOS DO BLOCO
+/**
+ * @swagger
+ * tags:
+ *   - name: BlocoAtivos
+ *     description: Ativos vinculados a um bloco de markup
+ *
+ * components:
+ *   schemas:
+ *     BlocoAtivosGetResponse:
+ *       type: object
+ *       properties:
+ *         ativos:
+ *           type: object
+ *           additionalProperties: true
+ *           description: Objeto com os ativos do bloco (estrutura livre)
+ *       example:
+ *         ativos:
+ *           energia: 1200
+ *           aluguel: 2500
+ *           manutencao:
+ *             maquinas: 300
+ *             frota: 180
+ *
+ *     BlocoAtivosPostPayload:
+ *       type: object
+ *       required: [ativos]
+ *       properties:
+ *         ativos:
+ *           type: object
+ *           additionalProperties: true
+ *           description: Objeto com os ativos do bloco (estrutura livre)
+ *       example:
+ *         ativos:
+ *           energia: 1350
+ *           aluguel: 2500
+ */
+
+// ============================ BUSCAR ATIVOS DO BLOCO ============================
+/**
+ * @swagger
+ * /bloco-ativos/{blocoId}:
+ *   get:
+ *     tags: [BlocoAtivos]
+ *     summary: Retorna os ativos salvos para um bloco do usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: blocoId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: ID do bloco
+ *     responses:
+ *       200:
+ *         description: Ativos do bloco (pode ser vazio)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BlocoAtivosGetResponse'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.get('/:blocoId', auth, async (req, res) => {
   const userId = req.userId;
   const { blocoId } = req.params;
@@ -18,7 +80,44 @@ router.get('/:blocoId', auth, async (req, res) => {
   }
 });
 
-// ATUALIZAR/CRIAR ATIVOS DO BLOCO
+// ========================= ATUALIZAR/CRIAR ATIVOS DO BLOCO ======================
+/**
+ * @swagger
+ * /bloco-ativos/{blocoId}:
+ *   post:
+ *     tags: [BlocoAtivos]
+ *     summary: Cria ou atualiza os ativos de um bloco do usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: blocoId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: ID do bloco
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BlocoAtivosPostPayload'
+ *     responses:
+ *       200:
+ *         description: Operação concluída
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *       400:
+ *         description: Payload inválido
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.post('/:blocoId', auth, async (req, res) => {
   const userId = req.userId;
   const { blocoId } = req.params;

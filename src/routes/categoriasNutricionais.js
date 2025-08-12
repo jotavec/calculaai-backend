@@ -1,10 +1,76 @@
 const express = require("express");
 const router = express.Router();
 const { PrismaClient } = require("@prisma/client");
-const auth = require("../middleware/auth"); // se não tiver, pode remover
+const auth = require("../middleware/auth");
 const prisma = new PrismaClient();
 
-// GET - listar todas categorias nutricionais do usuário
+/**
+ * @swagger
+ * tags:
+ *   - name: CategoriasNutricionais
+ *     description: CRUD de categorias nutricionais por usuário
+ *
+ * components:
+ *   schemas:
+ *     CategoriaNutricional:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *           example: "7a9f1b4c-3b9a-4d2a-b2c0-6b8a6a5b5c9e"
+ *         descricao:
+ *           type: string
+ *           example: "Carboidratos"
+ *         unidade:
+ *           type: string
+ *           example: "g"
+ *         userId:
+ *           type: string
+ *           format: uuid
+ *           example: "d0b0491e-1261-4381-9626-6f6ccfc7629e"
+ *     CategoriaNutricionalCreate:
+ *       type: object
+ *       required: [descricao, unidade]
+ *       properties:
+ *         descricao:
+ *           type: string
+ *           example: "Proteínas"
+ *         unidade:
+ *           type: string
+ *           example: "g"
+ *     CategoriaNutricionalUpdate:
+ *       type: object
+ *       properties:
+ *         descricao:
+ *           type: string
+ *           example: "Proteínas"
+ *         unidade:
+ *           type: string
+ *           example: "g"
+ */
+
+/**
+ * @swagger
+ * /categorias-nutricionais:
+ *   get:
+ *     tags: [CategoriasNutricionais]
+ *     summary: Lista todas as categorias nutricionais do usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Lista de categorias nutricionais
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/CategoriaNutricional'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.get("/", auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -18,7 +84,31 @@ router.get("/", auth, async (req, res) => {
   }
 });
 
-// POST - criar nova categoria nutricional
+/**
+ * @swagger
+ * /categorias-nutricionais:
+ *   post:
+ *     tags: [CategoriasNutricionais]
+ *     summary: Cria uma nova categoria nutricional para o usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CategoriaNutricionalCreate'
+ *     responses:
+ *       201:
+ *         description: Categoria criada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CategoriaNutricional'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.post("/", auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -32,7 +122,39 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-// PUT - editar categoria nutricional
+/**
+ * @swagger
+ * /categorias-nutricionais/{id}:
+ *   put:
+ *     tags: [CategoriasNutricionais]
+ *     summary: Atualiza uma categoria nutricional por ID
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID da categoria
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CategoriaNutricionalUpdate'
+ *     responses:
+ *       200:
+ *         description: Categoria atualizada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CategoriaNutricional'
+ *       401:
+ *         description: Não autorizado
+ *       404:
+ *         description: Não encontrada
+ *       500:
+ *         description: Erro interno
+ */
 router.put("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -47,7 +169,29 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
-// DELETE - remover categoria nutricional
+/**
+ * @swagger
+ * /categorias-nutricionais/{id}:
+ *   delete:
+ *     tags: [CategoriasNutricionais]
+ *     summary: Remove uma categoria nutricional por ID
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID da categoria
+ *     responses:
+ *       204:
+ *         description: Removida com sucesso
+ *       401:
+ *         description: Não autorizado
+ *       404:
+ *         description: Não encontrada
+ *       500:
+ *         description: Erro interno
+ */
 router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
