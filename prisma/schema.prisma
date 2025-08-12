@@ -1,42 +1,58 @@
-// Conexão com o banco PostgreSQL
+// =======================
+// Conexão com PostgreSQL
+// =======================
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// Gerador do Prisma Client
+// =======================
+// Prisma Client
+// =======================
 generator client {
   provider = "prisma-client-js"
 }
 
+// =======================
+// MODELS
+// =======================
+
 model User {
-  id                         String                 @id @default(uuid())
-  name                       String
-  email                      String                 @unique
-  passwordHash               String
-  createdAt                  DateTime               @default(now())
-  cpf                        String?
-  telefone                   String?
-  ingredients                Ingredient[]
-  fixedCostCategories        FixedCostCategory[]
-  fixedCosts                 FixedCost[]
-  recipes                    Recipe[]
-  pricingSettings            PricingSetting?
-  companyConfig              CompanyConfig?
-  salesGoals                 SalesGoal[]
-  salesResults               SalesResult[]
-  categorias                 Categoria[]            @relation("UserCategorias")
-  marcas                     Marca[]
-  funcionarios               Funcionario[]
-  encargosSobreVenda         EncargosSobreVenda[]
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  cpf          String?
+  telefone     String?
+
+  // Relacionamentos
+  ingredients            Ingredient[]
+  fixedCostCategories    FixedCostCategory[]
+  fixedCosts             FixedCost[]
+  recipes                Recipe[]
+  pricingSettings        PricingSetting?
+  companyConfig          CompanyConfig?
+  salesGoals             SalesGoal[]
+  salesResults           SalesResult[]
+  categorias             Categoria[]            @relation("UserCategorias")
+  marcas                 Marca[]
+  funcionarios           Funcionario[]
+  encargosSobreVenda     EncargosSobreVenda[]
+  blocos                 Bloco[]
+  blocoAtivos            BlocoAtivos[]
+  entradasEstoque        EntradaEstoque[]
+  categoriasNutricionais CategoriaNutricional[]
+  tiposProduto           TipoProduto[]
+  saidasEstoque          SaidaEstoque[] // <— relação adicionada
+  preferenciasColunas    PreferenciaColunas? // <— relação adicionada
+
+  // Configs
   filtroFaturamentoMediaTipo String?
-  blocos                     Bloco[]
-  blocoAtivos                BlocoAtivos[]
-  entradasEstoque            EntradaEstoque[]
-  categoriasNutricionais     CategoriaNutricional[]
-  tiposProduto               TipoProduto[]
-  avatarUrl                  String?                // <--- já tinha aqui
-  plano                      String                 @default("gratuito") // <--- CAMPO ADICIONADO AQUI!
+  avatarUrl                  String?
+  plano                      String  @default("gratuito")
+
+  @@index([email])
 }
 
 model Funcionario {
@@ -67,35 +83,42 @@ model Funcionario {
   planoSaudeValor      String
   outrosValor          String
   userId               String
-  user                 User     @relation(fields: [userId], references: [id])
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model FixedCostCategory {
   id         String      @id @default(uuid())
   name       String
   userId     String
-  user       User        @relation(fields: [userId], references: [id])
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   fixedCosts FixedCost[]
   createdAt  DateTime    @default(now())
+
+  @@index([userId])
 }
 
 model FixedCost {
   id         String            @id @default(uuid())
   userId     String
-  user       User              @relation(fields: [userId], references: [id])
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   categoryId String
-  category   FixedCostCategory @relation(fields: [categoryId], references: [id])
+  category   FixedCostCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   name       String
   value      Float
   createdAt  DateTime          @default(now())
+
+  @@index([userId])
+  @@index([categoryId])
 }
 
 model Ingredient {
   id          String             @id @default(uuid())
   userId      String
-  user        User               @relation(fields: [userId], references: [id])
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   brand       String?
   unitType    String
@@ -103,49 +126,56 @@ model Ingredient {
   pricePack   Float
   createdAt   DateTime           @default(now())
   recipeItems RecipeIngredient[]
+
+  @@index([userId])
 }
 
 model Recipe {
-  id           String             @id @default(uuid())
-  userId       String
-  user         User               @relation(fields: [userId], references: [id])
-  name         String
-  yieldQty     Float
-  yieldUnit    String
-  notes        String?
-  createdAt    DateTime           @default(now())
-  ingredients  RecipeIngredient[]
-  ingredientes Json?
-  embalagens   Json?
-  subReceitas  Json?
-  maoDeObra    Json?
-  imagemFinal      String?
-  conservacaoData  Json?
-  passosPreparo    Json?
-  tipoSelecionado        Json?
-  dataUltimaAtualizacao  String?
+  id                    String             @id @default(uuid())
+  userId                String
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                  String
+  yieldQty              Float
+  yieldUnit             String
+  notes                 String?
+  createdAt             DateTime           @default(now())
+  ingredients           RecipeIngredient[]
+  ingredientes          Json?
+  embalagens            Json?
+  subReceitas           Json?
+  maoDeObra             Json?
+  imagemFinal           String?
+  conservacaoData       Json?
+  passosPreparo         Json?
+  tipoSelecionado       Json?
+  dataUltimaAtualizacao String?
   tempoTotal            String?
   tempoUnidade          String?
-  precoVenda         String?
-  pesoUnitario       String?
-  descontoReais      String?
-  descontoPercentual String?
-  blocoMarkupAtivo String?
+  precoVenda            String?
+  pesoUnitario          String?
+  descontoReais         String?
+  descontoPercentual    String?
+  blocoMarkupAtivo      String?
+
+  @@index([userId])
 }
 
 model RecipeIngredient {
   id           String     @id @default(uuid())
   recipeId     String
   ingredientId String
-  recipe       Recipe     @relation(fields: [recipeId], references: [id])
-  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
   qtyUsed      Float
+
+  @@index([recipeId])
+  @@index([ingredientId])
 }
 
 model PricingSetting {
   id                String  @id @default(uuid())
   userId            String  @unique
-  user              User    @relation(fields: [userId], references: [id])
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   markupPercent     Float
   lossPercent       Float
   commissionPercent Float
@@ -156,7 +186,7 @@ model PricingSetting {
 model CompanyConfig {
   id                String   @id @default(uuid())
   userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id])
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   companyName       String
   cnpj              String?
   phone             String?
@@ -180,7 +210,10 @@ model SalesGoal {
   userId String
   month  String
   value  Float
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([month])
 }
 
 model SalesResult {
@@ -188,30 +221,39 @@ model SalesResult {
   userId String
   month  String
   value  Float
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([month])
 }
 
 model Categoria {
   id     String @id @default(uuid())
   nome   String
   userId String
-  user   User   @relation(fields: [userId], references: [id], name: "UserCategorias")
+  user   User   @relation(fields: [userId], references: [id], name: "UserCategorias", onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Marca {
   id     String @id @default(uuid())
   nome   String
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model EncargosSobreVenda {
   id        String   @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   data      Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model Bloco {
@@ -230,21 +272,26 @@ model Bloco {
   observacoes        String?
   userId             String
   totalEncargosReais Float?        @default(0)
-  user               User          @relation(fields: [userId], references: [id])
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   ativos             BlocoAtivos[]
+
+  @@index([userId])
 }
 
 model BlocoAtivos {
   id        String   @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   blocoId   Int
-  bloco     Bloco    @relation(fields: [blocoId], references: [id])
+  bloco     Bloco    @relation(fields: [blocoId], references: [id], onDelete: Cascade)
   ativos    Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([blocoId])
 }
 
 model Produto {
@@ -253,7 +300,7 @@ model Produto {
   codBarras           String?
   nome                String
   categoria           String
-  marca               String[]
+  marca               String[] // Postgres text[]
   unidade             String
   estoque             String
   custo               String
@@ -266,10 +313,14 @@ model Produto {
   rotuloNutricional   Json?
   entradasEstoque     EntradaEstoque[]
   rotulosNutricionais ProdutoRotuloNutricional[]
+  SaidaEstoque        SaidaEstoque[]
+
+  @@index([codigo])
 }
 
 model PreferenciaColunas {
   userId  String @id
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   colunas String
 }
 
@@ -282,7 +333,10 @@ model EntradaEstoque {
   lote       String?
   data       String
   userId     String
-  user       User    @relation(fields: [userId], references: [id])
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([produtoId])
+  @@index([userId])
 }
 
 model Fornecedor {
@@ -302,9 +356,14 @@ model Fornecedor {
 model SaidaEstoque {
   id         String    @id @default(uuid())
   produtoId  String
+  produto    Produto   @relation(fields: [produtoId], references: [id], onDelete: Cascade)
   quantidade Int
   userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   data       DateTime?
+
+  @@index([produtoId])
+  @@index([userId])
 }
 
 model CategoriaNutricional {
@@ -312,8 +371,10 @@ model CategoriaNutricional {
   descricao           String
   unidade             String
   userId              String
-  user                User                       @relation(fields: [userId], references: [id])
+  user                User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
   rotulosNutricionais ProdutoRotuloNutricional[]
+
+  @@index([userId])
 }
 
 model ProdutoRotuloNutricional {
@@ -322,16 +383,20 @@ model ProdutoRotuloNutricional {
   categoriaNutricionalId String
   quantidade             String
   vd                     String?
-  produto                Produto              @relation(fields: [produtoId], references: [id])
-  categoriaNutricional   CategoriaNutricional @relation(fields: [categoriaNutricionalId], references: [id])
+  produto                Produto              @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  categoriaNutricional   CategoriaNutricional @relation(fields: [categoriaNutricionalId], references: [id], onDelete: Cascade)
 
   @@unique([produtoId, categoriaNutricionalId])
+  @@index([produtoId])
+  @@index([categoriaNutricionalId])
 }
 
 model TipoProduto {
   id        String   @id @default(uuid())
   nome      String
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
