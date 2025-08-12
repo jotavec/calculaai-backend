@@ -14,9 +14,6 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
-// Domínio do cookie (use env COOKIE_DOMAIN se quiser alterar)
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || ".onrender.com";
-
 // ====== Opções do cookie de sessão (cross-site) ======
 const cookieOpts = {
   httpOnly: true,
@@ -24,7 +21,6 @@ const cookieOpts = {
   sameSite: "none",     // permite envio entre domínios (vercel.app -> onrender.com)
   path: "/",
   maxAge: TOKEN_TTL_MS,
-  domain: COOKIE_DOMAIN // garante que o cookie pertença ao domínio do backend
 };
 
 /**
@@ -241,23 +237,37 @@ router.put("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// upload avatar
+// upload avatar (com LOG de debug)
 router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
+    if (!req.file) {
+      return res.status(400).json({ error: "Arquivo não enviado." });
+    }
 
+    const userId = req.userId;
+
+    // Remove arquivos antigos de outras extensões (se existirem)
     const exts = [".png", ".jpg", ".jpeg", ".webp"];
     for (const e of exts) {
-      const f = path.join(avatarsDir, `${req.userId}${e}`);
+      const f = path.join(avatarsDir, `${userId}${e}`);
       if (fs.existsSync(f) && f !== req.file.path) {
         try { fs.unlinkSync(f); } catch (_) {}
       }
     }
 
+    // Caminho público que o front vai usar
     const avatarPathPublic = toPublicUploadsPath(`uploads/avatars/${req.file.filename}`);
+
+    // ===== DEBUG LOGS =====
+    const absSaved = req.file.path;
+    const existsNow = fs.existsSync(absSaved);
+    console.log("[avatar upload] saved:", absSaved);
+    console.log("[avatar upload] public:", avatarPathPublic);
+    console.log("[avatar upload] exists:", existsNow);
+
     await prisma.user.update({
-      where: { id: req.userId },
-      data: { avatarUrl: avatarPathPublic },
+      where: { id: userId },
+      data: { avatarUrl: avatarPathPublic }
     });
 
     res.json({ ok: true, avatarUrl: avatarPathPublic });
@@ -360,7 +370,7 @@ router.post("/filtro-faturamento", authMiddleware, async (req, res) => {
       where: { id: req.userId },
       data: { filtroFaturamentoMediaTipo: filtro },
     });
-  res.json({ ok: true });
+    res.json({ ok: true });
   } catch (error) {
     console.error("[POST filtro-faturamento]", error);
     res.status(500).json({ error: "Erro ao salvar filtro" });
