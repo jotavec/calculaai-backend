@@ -7,6 +7,32 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+// ---- S3 (Cloudflare R2) ----
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
+
+const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex: https://<accountid>.r2.cloudflarestorage.com
+const R2_BUCKET = process.env.R2_BUCKET; // ex: calculaai-uploads
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, ""); // sem barra no fim
+
+const s3 =
+  R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
+    ? new S3Client({
+        region: "auto",
+        endpoint: R2_ENDPOINT,
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: R2_ACCESS_KEY_ID,
+          secretAccessKey: R2_SECRET_ACCESS_KEY,
+        },
+      })
+    : null;
+
 const router = express.Router();
 const prisma = new PrismaClient();
 
@@ -14,11 +40,11 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
-// ====== Opções do cookie de sessão (cross-site) ======
+// ====== Cookies cross-site ======
 const cookieOpts = {
   httpOnly: true,
-  secure: true,         // obrigatório junto com SameSite=None
-  sameSite: "none",     // permite envio entre domínios (vercel.app -> onrender.com)
+  secure: true,
+  sameSite: "none",
   path: "/",
   maxAge: TOKEN_TTL_MS,
 };
@@ -83,32 +109,15 @@ const cookieOpts = {
  *         filtro: { type: string, example: "6" }
  */
 
-/**
- * @swagger
- * /users/debug-existe:
- *   get:
- *     tags: [Users]
- *     summary: Healthcheck simples
- *     responses:
- *       200: { description: OK }
- */
-router.get("/debug-existe", (_req, res) => {
-  res.send({ ok: true });
-});
+// Healthcheck
+router.get("/debug-existe", (_req, res) => res.send({ ok: true }));
 
-/* ---------- Multer (avatar) ---------- */
-const avatarsDir = path.join(__dirname, "../../uploads/avatars");
-if (!fs.existsSync(avatarsDir)) {
-  fs.mkdirSync(avatarsDir, { recursive: true });
-}
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, avatarsDir),
-  filename: (req, file, cb) => {
-    const ext = (path.extname(file.originalname) || ".png").toLowerCase();
-    cb(null, `${req.userId}${ext}`);
-  },
+/* ---------- Multer (avatar em MEMÓRIA) ---------- */
+// Limite de 5MB por avatar (ajuste se quiser)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
-const upload = multer({ storage });
 
 /* ---------- helpers ---------- */
 function extractTokenFromAuthHeader(req) {
@@ -117,18 +126,6 @@ function extractTokenFromAuthHeader(req) {
   const [scheme, token] = String(auth).split(" ");
   if (/^Bearer$/i.test(scheme) && token) return token;
   return null;
-}
-
-function toPublicUploadsPath(p) {
-  if (!p) return "";
-  let rel = String(p).replace(/\\/g, "/");
-  rel = rel.replace(/^public\//, "");
-  if (!rel.startsWith("uploads/")) {
-    const i = rel.indexOf("uploads/");
-    if (i >= 0) rel = rel.slice(i);
-  }
-  if (!rel.startsWith("/")) rel = "/" + rel;
-  return rel;
 }
 
 function authMiddleware(req, res, next) {
@@ -149,6 +146,16 @@ function sanitizeUser(u) {
   if (!u) return null;
   const { passwordHash, senha, ...rest } = u;
   return rest;
+}
+
+// Dado um avatarUrl antigo, se for do R2, extrai a chave (Key)
+function keyFromPublicUrl(url) {
+  if (!url || !R2_PUBLIC_URL_PREFIX) return null;
+  const normalized = String(url).trim();
+  if (!normalized.startsWith(R2_PUBLIC_URL_PREFIX)) return null;
+  let key = normalized.slice(R2_PUBLIC_URL_PREFIX.length);
+  key = key.replace(/^\/+/, ""); // remove barra inicial
+  return key || null;
 }
 
 /* ---------- rotas ---------- */
@@ -237,42 +244,62 @@ router.put("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// upload avatar (com LOG de debug)
+// ===== Upload de avatar para o R2 =====
 router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "Arquivo não enviado." });
-    }
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
+    if (!s3) return res.status(500).json({ error: "R2 não configurado no servidor." });
 
     const userId = req.userId;
+    const file = req.file;
 
-    // Remove arquivos antigos de outras extensões (se existirem)
-    const exts = [".png", ".jpg", ".jpeg", ".webp"];
-    for (const e of exts) {
-      const f = path.join(avatarsDir, `${userId}${e}`);
-      if (fs.existsSync(f) && f !== req.file.path) {
-        try { fs.unlinkSync(f); } catch (_) {}
+    const originalExt = (path.extname(file.originalname) || "").toLowerCase();
+    // default para .png se não vier extensão
+    const ext = originalExt && originalExt.length <= 6 ? originalExt : ".png";
+
+    // Ex: avatars/USERID/1690000000000.png
+    const key = `avatars/${userId}/${Date.now()}${ext}`;
+
+    // Envia para o R2
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: key,
+        Body: file.buffer,
+        ContentType: file.mimetype || "application/octet-stream",
+        // ACL não é usado no R2; a URL pública virá do R2_PUBLIC_URL_PREFIX
+      })
+    );
+
+    // Apaga o avatar antigo (se já existia e for do mesmo R2)
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarUrl: true },
+    });
+
+    const oldKey = keyFromPublicUrl(current?.avatarUrl);
+    if (oldKey) {
+      try {
+        await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: oldKey }));
+      } catch (_) {
+        // silencioso — não queremos quebrar upload se falhar delete do antigo
       }
     }
 
-    // Caminho público que o front vai usar
-    const avatarPathPublic = toPublicUploadsPath(`uploads/avatars/${req.file.filename}`);
-
-    // ===== DEBUG LOGS =====
-    const absSaved = req.file.path;
-    const existsNow = fs.existsSync(absSaved);
-    console.log("[avatar upload] saved:", absSaved);
-    console.log("[avatar upload] public:", avatarPathPublic);
-    console.log("[avatar upload] exists:", existsNow);
+    // Monta URL pública
+    const publicUrl = R2_PUBLIC_URL_PREFIX
+      ? `${R2_PUBLIC_URL_PREFIX}/${key}`
+      : // fallback (não recomendado em produção; ideal é sempre usar R2_PUBLIC_URL_PREFIX)
+        `${R2_ENDPOINT.replace("https://", "https://")}/${R2_BUCKET}/${key}`;
 
     await prisma.user.update({
       where: { id: userId },
-      data: { avatarUrl: avatarPathPublic }
+      data: { avatarUrl: publicUrl },
     });
 
-    res.json({ ok: true, avatarUrl: avatarPathPublic });
+    return res.json({ ok: true, avatarUrl: publicUrl });
   } catch (error) {
-    console.error("[avatar upload]", error);
+    console.error("[avatar upload R2]", error);
     res.status(500).json({ error: "Erro ao salvar avatar." });
   }
 });
@@ -343,7 +370,6 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
 // logout
 router.post("/logout", (_req, res) => {
-  // precisa usar mesmos atributos do setCookie
   res.clearCookie("token", { ...cookieOpts, maxAge: 0 });
   res.json({ message: "Logout realizado!" });
 });
