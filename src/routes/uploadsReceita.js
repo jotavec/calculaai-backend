@@ -7,6 +7,13 @@ const salvarImagem = require('../util/salvarImagem'); // R2 (S3) uploader
 const router = express.Router();
 
 /**
+ * @swagger
+ * tags:
+ *   - name: Uploads
+ *     description: Endpoints para upload de arquivos (imagens) no sistema
+ */
+
+/**
  * Multer em MEMÓRIA (buffer), sem gravar em disco local.
  * Limite de 10MB por arquivo (ajuste se precisar).
  * Filtra somente imagens comuns.
@@ -23,10 +30,42 @@ const upload = multer({
 });
 
 /**
- * POST /uploads/receita
- * Campo do form-data: "file"
- * Autenticado (usa req.userId do middleware)
- * Retorna: { url: 'https://...r2.../arquivo.png' }
+ * @swagger
+ * /uploads/receita:
+ *   post:
+ *     tags: [Uploads]
+ *     summary: Faz o upload de uma imagem de receita
+ *     description: Recebe uma imagem no campo `file` (form-data) e retorna a URL pública gerada no storage.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Imagem a ser enviada (PNG, JPG, JPEG, WEBP ou GIF)
+ *     responses:
+ *       200:
+ *         description: Upload realizado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 url:
+ *                   type: string
+ *                   example: "https://cdn.seusistema.com/uploads/receitas/abc123.png"
+ *       400:
+ *         description: Nenhum arquivo enviado ou formato inválido
+ *       500:
+ *         description: Erro interno no servidor
  */
 router.post('/receita', auth, upload.single('file'), async (req, res) => {
   try {

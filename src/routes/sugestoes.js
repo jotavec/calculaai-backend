@@ -10,6 +10,13 @@ const prisma = new PrismaClient();
 const auth = require('../middleware/auth');
 const nodemailer = require('nodemailer');
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Sugestões
+ *     description: Endpoints para envio de sugestões pelos usuários
+ */
+
 /* ========================= helpers ========================= */
 function escapeHtml(str = '') {
   return String(str)
@@ -27,7 +34,7 @@ function buildTransporter() {
     return nodemailer.createTransport({
       host: SMTP_HOST,
       port: Number(SMTP_PORT),
-      secure: Number(SMTP_PORT) === 465, // TLS se 465
+      secure: Number(SMTP_PORT) === 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
   }
@@ -40,7 +47,6 @@ function buildTransporter() {
   });
 }
 
-/* Tenta achar o usuário por diferentes campos que seu middleware pode setar */
 async function resolveUsuario(req) {
   const tentativas = [];
 
@@ -75,7 +81,39 @@ async function resolveUsuario(req) {
   return { user: null, via: null };
 }
 
-/* ========================= POST /api/sugestoes ========================= */
+/**
+ * @swagger
+ * /sugestoes:
+ *   post:
+ *     tags: [Sugestões]
+ *     summary: Envia uma nova sugestão
+ *     description: Envia uma sugestão para o e-mail configurado no sistema
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assunto
+ *               - descricao
+ *             properties:
+ *               assunto:
+ *                 type: string
+ *                 example: Melhorar o layout da página inicial
+ *               descricao:
+ *                 type: string
+ *                 example: Acho que o layout poderia ser mais claro e com cores mais suaves.
+ *     responses:
+ *       201:
+ *         description: Sugestão enviada com sucesso
+ *       400:
+ *         description: Campos obrigatórios não informados
+ *       500:
+ *         description: Erro interno ao enviar sugestão
+ */
 router.post('/', auth, async (req, res) => {
   const startedAt = new Date();
 
@@ -87,8 +125,7 @@ router.post('/', auth, async (req, res) => {
 
     const { user, via } = await resolveUsuario(req);
     if (!user) {
-      console.warn('[Sugestoes] Usuário não encontrado a partir do token. Campos disponíveis no req:',
-        { userId: req.userId, user: req.user, email: req.email });
+      console.warn('[Sugestoes] Usuário não encontrado a partir do token. Campos disponíveis no req:', { userId: req.userId, user: req.user, email: req.email });
     } else {
       console.log('[Sugestoes] Usuário resolvido via %s -> id=%s email=%s', via, user.id, user.email);
     }
@@ -106,28 +143,12 @@ router.post('/', auth, async (req, res) => {
     const html = `
       <div style="font-family: Arial, Helvetica, sans-serif; font-size:14px; color:#111827;">
         <h2 style="margin:0 0 10px 0;">Nova sugestão recebida</h2>
-
-        <p style="margin:6px 0;">
-          <b>Assunto:</b> ${escapeHtml(assunto)}
-        </p>
-
-        <p style="margin:6px 0;">
-          <b>De:</b> ${escapeHtml(remetenteNome)} &lt;${escapeHtml(remetenteEmail)}&gt;
-        </p>
-
-        <p style="margin:6px 0;">
-          <b>User ID:</b> ${escapeHtml(userIdExibicao)}
-        </p>
-
-        <hr style="border:none; border-top:1px solid #e5e7eb; margin:12px 0;" />
-
-        <p style="white-space:pre-wrap; line-height:1.55;">
-          <b>Descrição:</b><br>${escapeHtml(descricao)}
-        </p>
-
-        <p style="margin-top:16px; font-size:12px; color:#6b7280;">
-          Enviado em: ${startedAt.toISOString()}
-        </p>
+        <p><b>Assunto:</b> ${escapeHtml(assunto)}</p>
+        <p><b>De:</b> ${escapeHtml(remetenteNome)} &lt;${escapeHtml(remetenteEmail)}&gt;</p>
+        <p><b>User ID:</b> ${escapeHtml(userIdExibicao)}</p>
+        <hr />
+        <p style="white-space:pre-wrap; line-height:1.55;"><b>Descrição:</b><br>${escapeHtml(descricao)}</p>
+        <p style="margin-top:16px; font-size:12px; color:#6b7280;">Enviado em: ${startedAt.toISOString()}</p>
       </div>
     `;
 

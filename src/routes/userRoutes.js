@@ -13,11 +13,11 @@ const {
   DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
 
-const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex: https://<accountid>.r2.cloudflarestorage.com
-const R2_BUCKET = process.env.R2_BUCKET; // ex: calculaai-uploads
+const R2_ENDPOINT = process.env.R2_ENDPOINT;
+const R2_BUCKET = process.env.R2_BUCKET;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, ""); // sem barra no fim
+const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, "");
 
 const s3 =
   R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
@@ -39,7 +39,6 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
-// ====== Cookies cross-site ======
 const cookieOpts = {
   httpOnly: true,
   secure: true,
@@ -111,14 +110,13 @@ const cookieOpts = {
 // Healthcheck
 router.get("/debug-existe", (_req, res) => res.send({ ok: true }));
 
-/* ---------- Multer (avatar em MEMÓRIA) ---------- */
-// Limite de 5MB por avatar (ajuste se quiser)
+// ---------- Multer (avatar em memória) ----------
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-/* ---------- helpers ---------- */
+// ---------- helpers ----------
 function extractTokenFromAuthHeader(req) {
   const auth = req.headers?.authorization || req.headers?.Authorization;
   if (!auth) return null;
@@ -147,7 +145,6 @@ function sanitizeUser(u) {
   return rest;
 }
 
-// Dado um avatarUrl antigo, se for do R2, extrai a chave (Key) relativa ao bucket
 function keyFromPublicUrl(url) {
   if (!url || !R2_PUBLIC_URL_PREFIX) return null;
   const normalized = String(url).trim();
@@ -157,9 +154,9 @@ function keyFromPublicUrl(url) {
   return key || null;
 }
 
-/* ---------- rotas ---------- */
+// ---------- Rotas ----------
 
-// cadastro
+// Cadastro
 router.post("/", async (req, res) => {
   const { name, email, password, cpf, telefone } = req.body || {};
   if (!name || !email || !password) {
@@ -189,7 +186,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// login
+// Login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email e senha obrigatórios." });
@@ -212,7 +209,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// me
+// Me
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -227,7 +224,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// atualizar perfil
+// Atualizar perfil
 router.put("/me", authMiddleware, async (req, res) => {
   try {
     const { name, email, cpf, telefone } = req.body || {};
@@ -243,7 +240,7 @@ router.put("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// ===== Upload de avatar para o R2 =====
+// Upload de avatar para R2
 router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
@@ -255,10 +252,8 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
     const originalExt = (path.extname(file.originalname) || "").toLowerCase();
     const ext = originalExt && originalExt.length <= 6 ? originalExt : ".png";
 
-    // Ex: avatars/<userId>/<timestamp>.png
     const key = `avatars/${userId}/${Date.now()}${ext}`;
 
-    // Envia para o R2
     await s3.send(
       new PutObjectCommand({
         Bucket: R2_BUCKET,
@@ -269,7 +264,6 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
       })
     );
 
-    // Apaga o avatar antigo (se existia e era do mesmo R2)
     const current = await prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },
@@ -278,15 +272,12 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
     if (oldKey) {
       try {
         await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: oldKey }));
-      } catch (_) {
-        // silencioso — não falha o upload se não conseguiu deletar o antigo
-      }
+      } catch (_) {}
     }
 
-    // Monta URL pública
     const publicUrl = R2_PUBLIC_URL_PREFIX
       ? `${R2_PUBLIC_URL_PREFIX}/${key}`
-      : `${R2_ENDPOINT}/${R2_BUCKET}/${key}`; // fallback (recomendo sempre usar o prefixo público)
+      : `${R2_ENDPOINT}/${R2_BUCKET}/${key}`;
 
     await prisma.user.update({
       where: { id: userId },
@@ -300,7 +291,7 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
   }
 });
 
-// troca de senha
+// Troca de senha
 router.post("/change-password", authMiddleware, async (req, res) => {
   try {
     const { senhaNova } = req.body || {};
@@ -318,7 +309,7 @@ router.post("/change-password", authMiddleware, async (req, res) => {
   }
 });
 
-// listagem (protegido)
+// Listagem
 router.get("/", authMiddleware, async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -331,7 +322,7 @@ router.get("/", authMiddleware, async (_req, res) => {
   }
 });
 
-// update por id
+// Update por id
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -348,7 +339,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// buscar por id
+// Buscar por id
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
@@ -364,13 +355,13 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// logout
+// Logout
 router.post("/logout", (_req, res) => {
   res.clearCookie("token", { ...cookieOpts, maxAge: 0 });
   res.json({ message: "Logout realizado!" });
 });
 
-// filtro de média de faturamento
+// Filtro faturamento
 router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({

@@ -1,13 +1,34 @@
+// src/routes/movimentacoesEstoque.js
 const express = require("express");
 const router = express.Router();
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-const auth = require("../middleware/auth"); // IMPORTANTE: Middleware de autenticação
+const auth = require("../middleware/auth");
 
-// Middleware para bloquear acesso de planos gratuitos
+/**
+ * @swagger
+ * tags:
+ *   - name: MovimentacoesEstoque
+ *     description: Controle de movimentações de estoque (entradas e saídas)
+ *
+ * components:
+ *   schemas:
+ *     Movimentacao:
+ *       type: object
+ *       properties:
+ *         id: { type: string, example: "uuid-da-movimentacao" }
+ *         tipo: { type: string, enum: ["entrada", "saida"], example: "entrada" }
+ *         produtoId: { type: string, example: "uuid-do-produto" }
+ *         quantidade: { type: string, example: "10" }
+ *         data: { type: string, format: date-time }
+ *     MovimentacaoList:
+ *       type: array
+ *       items: { $ref: '#/components/schemas/Movimentacao' }
+ */
+
+// Middleware para bloquear planos gratuitos
 async function bloqueiaGratuito(req, res, next) {
   try {
-    // Busca userId pelo middleware de auth
     const userId = req.userId;
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const plano = user?.plano || "gratuito";
@@ -23,10 +44,28 @@ async function bloqueiaGratuito(req, res, next) {
   }
 }
 
-// Todas as rotas exigem login e bloqueiam plano gratuito
 router.use(auth, bloqueiaGratuito);
 
-// Retorna todas as movimentações (entrada + saída)
+/**
+ * @swagger
+ * /movimentacoes:
+ *   get:
+ *     tags: [MovimentacoesEstoque]
+ *     summary: Lista todas as movimentações de estoque (entradas e saídas)
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Lista de movimentações
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/MovimentacaoList' }
+ *       401:
+ *         description: Não autorizado
+ *       403:
+ *         description: Restrito a assinantes
+ *       500:
+ *         description: Erro interno
+ */
 router.get("/", async (req, res) => {
   try {
     const entradas = await prisma.entradaEstoque.findMany();
@@ -57,14 +96,35 @@ router.get("/", async (req, res) => {
   }
 });
 
-// =============== DELETAR ENTRADA DE ESTOQUE ================
+/**
+ * @swagger
+ * /movimentacoes/entrada/{id}:
+ *   delete:
+ *     tags: [MovimentacoesEstoque]
+ *     summary: Deleta uma entrada de estoque e atualiza o saldo do produto
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID da entrada de estoque
+ *     responses:
+ *       200:
+ *         description: Entrada removida com sucesso
+ *       404:
+ *         description: Entrada ou produto não encontrado
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.delete("/entrada/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const entrada = await prisma.entradaEstoque.findUnique({ where: { id } });
     if (!entrada) return res.status(404).json({ error: "Entrada não encontrada" });
 
-    // Busca o produto e calcula o novo estoque (STRING!)
     const produto = await prisma.produto.findUnique({ where: { id: entrada.produtoId } });
     if (!produto) return res.status(404).json({ error: "Produto não encontrado" });
 
@@ -86,14 +146,35 @@ router.delete("/entrada/:id", async (req, res) => {
   }
 });
 
-// =============== DELETAR SAÍDA DE ESTOQUE ================
+/**
+ * @swagger
+ * /movimentacoes/saida/{id}:
+ *   delete:
+ *     tags: [MovimentacoesEstoque]
+ *     summary: Deleta uma saída de estoque e atualiza o saldo do produto
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID da saída de estoque
+ *     responses:
+ *       200:
+ *         description: Saída removida com sucesso
+ *       404:
+ *         description: Saída ou produto não encontrado
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.delete("/saida/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const saida = await prisma.saidaEstoque.findUnique({ where: { id } });
     if (!saida) return res.status(404).json({ error: "Saída não encontrada" });
 
-    // Busca o produto e calcula o novo estoque (STRING!)
     const produto = await prisma.produto.findUnique({ where: { id: saida.produtoId } });
     if (!produto) return res.status(404).json({ error: "Produto não encontrado" });
 

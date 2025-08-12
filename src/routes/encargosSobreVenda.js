@@ -4,13 +4,89 @@ const auth = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// GET – Buscar dados (por usuário logado)
+/**
+ * @swagger
+ * tags:
+ *   - name: EncargosSobreVenda
+ *     description: Configuração de impostos, taxas e encargos incidentes sobre a venda do usuário
+ *
+ * components:
+ *   schemas:
+ *     EncargoItem:
+ *       type: object
+ *       properties:
+ *         percent: { type: number, example: 3.5 }
+ *         value:   { type: number, example: 120.00 }
+ *
+ *     EncargosSobreVendaPayload:
+ *       type: object
+ *       properties:
+ *         icms:           { $ref: '#/components/schemas/EncargoItem' }
+ *         iss:            { $ref: '#/components/schemas/EncargoItem' }
+ *         pisCofins:      { $ref: '#/components/schemas/EncargoItem' }
+ *         irpjCsll:       { $ref: '#/components/schemas/EncargoItem' }
+ *         ipi:            { $ref: '#/components/schemas/EncargoItem' }
+ *         debito:         { $ref: '#/components/schemas/EncargoItem' }
+ *         credito:        { $ref: '#/components/schemas/EncargoItem' }
+ *         boleto:         { $ref: '#/components/schemas/EncargoItem' }
+ *         pix:            { $ref: '#/components/schemas/EncargoItem' }
+ *         gateway:        { $ref: '#/components/schemas/EncargoItem' }
+ *         marketing:      { $ref: '#/components/schemas/EncargoItem' }
+ *         delivery:       { $ref: '#/components/schemas/EncargoItem' }
+ *         saas:           { $ref: '#/components/schemas/EncargoItem' }
+ *         colaboradores:  { $ref: '#/components/schemas/EncargoItem' }
+ *         creditoParcelado:
+ *           type: array
+ *           description: Parcelas de cartão de crédito com percentuais específicos
+ *           items:
+ *             type: object
+ *             properties:
+ *               parcelas: { type: integer, example: 3 }
+ *               percent:  { type: number,  example: 5.2 }
+ *         outros:
+ *           type: array
+ *           description: Lista livre de outros encargos
+ *           items:
+ *             type: object
+ *             properties:
+ *               nome:    { type: string,  example: "Taxa de plataforma" }
+ *               percent: { type: number,  example: 1.2 }
+ *               value:   { type: number,  example: 0 }
+ *
+ *     EncargosSobreVendaResponse:
+ *       allOf:
+ *         - $ref: '#/components/schemas/EncargosSobreVendaPayload'
+ *         - type: object
+ *           properties:
+ *             id:        { type: string, format: uuid, nullable: true }
+ *             createdAt: { type: string, format: date-time, nullable: true }
+ *             updatedAt: { type: string, format: date-time, nullable: true }
+ */
+
+/**
+ * @swagger
+ * /encargos-sobre-venda:
+ *   get:
+ *     tags: [EncargosSobreVenda]
+ *     summary: Retorna os encargos sobre venda do usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Configuração atual (valores zerados se ainda não existir)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EncargosSobreVendaResponse'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
     let registro = await prisma.encargosSobreVenda.findFirst({ where: { userId } });
     if (!registro) {
-      // retorna todos os campos esperados como vazio
       return res.json({
         icms: { percent: 0, value: 0 },
         iss: { percent: 0, value: 0 },
@@ -34,27 +110,45 @@ router.get('/', auth, async (req, res) => {
       });
     }
     const { data, createdAt, updatedAt, id } = registro;
-    // data pode ser null, então garante objeto vazio
     const base = data || {};
-    res.json({
-      ...base,
-      id,
-      createdAt,
-      updatedAt
-    });
+    res.json({ ...base, id, createdAt, updatedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-
-
-// POST – Salvar (cria ou atualiza)
+/**
+ * @swagger
+ * /encargos-sobre-venda:
+ *   post:
+ *     tags: [EncargosSobreVenda]
+ *     summary: Cria ou atualiza os encargos sobre venda do usuário autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/EncargosSobreVendaPayload'
+ *     responses:
+ *       200:
+ *         description: Salvo com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean, example: true }
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.post('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
-    // Recebe tudo do body
     const payload = req.body;
+
     let registro = await prisma.encargosSobreVenda.findFirst({ where: { userId } });
     if (registro) {
       await prisma.encargosSobreVenda.update({
@@ -71,6 +165,5 @@ router.post('/', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 module.exports = router;

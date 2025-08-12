@@ -1,4 +1,4 @@
-// src/routes/filtroFaturamento.js
+// src/routes/filtroFaturamento.js — COMPLETO (com Swagger)
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const jwt = require("jsonwebtoken");
@@ -20,8 +20,88 @@ function authMiddleware(req, res, next) {
   }
 }
 
+/**
+ * @swagger
+ * tags:
+ *   - name: FiltroFaturamento
+ *     description: Preferência do usuário para o filtro de média de faturamento
+ *   - name: SalesResults
+ *     description: CRUD simples dos resultados de faturamento (mês/valor)
+ *
+ * components:
+ *   schemas:
+ *     FiltroFaturamentoGetResponse:
+ *       type: object
+ *       properties:
+ *         filtro:
+ *           type: string
+ *           description: Janela usada para média ("1" | "3" | "6" | "12" | "all")
+ *           example: "6"
+ *
+ *     FiltroFaturamentoSetPayload:
+ *       type: object
+ *       required: [filtro]
+ *       properties:
+ *         filtro:
+ *           type: string
+ *           enum: ["1", "3", "6", "12", "all"]
+ *           example: "12"
+ *
+ *     SalesResult:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *           example: "a9b3c1de-1f23-4c56-8a9b-1c2d3e4f5a6b"
+ *         userId:
+ *           type: string
+ *           format: uuid
+ *           example: "d0b0491e-1261-4381-9626-6f6ccfc7629e"
+ *         month:
+ *           type: string
+ *           description: Mês no formato YYYY-MM
+ *           example: "2025-08"
+ *         value:
+ *           type: number
+ *           example: 42000
+ *
+ *     SalesResultCreate:
+ *       type: object
+ *       required: [month, value]
+ *       properties:
+ *         month:
+ *           type: string
+ *           description: Mês no formato YYYY-MM
+ *           example: "2025-08"
+ *         value:
+ *           type: number
+ *           example: 42000
+ */
+
 /* ================== FILTRO DE MÉDIA (mesma tela) ================== */
-// GET /api/filtro-faturamento
+/**
+ * @swagger
+ * /filtro-faturamento:
+ *   get:
+ *     tags: [FiltroFaturamento]
+ *     summary: Retorna a janela de média de faturamento escolhida pelo usuário
+ *     description: Valores possíveis para filtro são "1", "3", "6", "12" ou "all". Padrão "6" se não configurado.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Filtro atual do usuário
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/FiltroFaturamentoGetResponse'
+ *       401:
+ *         description: Não autorizado
+ *       404:
+ *         description: Usuário não encontrado
+ *       500:
+ *         description: Erro interno
+ */
 router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -35,7 +115,33 @@ router.get("/filtro-faturamento", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/filtro-faturamento
+/**
+ * @swagger
+ * /filtro-faturamento:
+ *   post:
+ *     tags: [FiltroFaturamento]
+ *     summary: Define a janela de média de faturamento do usuário
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/FiltroFaturamentoSetPayload'
+ *     responses:
+ *       200:
+ *         description: Salvo com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean, example: true }
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.post("/filtro-faturamento", authMiddleware, async (req, res) => {
   try {
     const { filtro } = req.body; // "1" | "3" | "6" | "12" | "all"
@@ -50,7 +156,27 @@ router.post("/filtro-faturamento", authMiddleware, async (req, res) => {
 });
 
 /* ================== SALES RESULTS (mesma tela) ================== */
-// GET /api/sales-results
+/**
+ * @swagger
+ * /sales-results:
+ *   get:
+ *     tags: [SalesResults]
+ *     summary: Lista os resultados de faturamento do usuário (por mês)
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Lista de faturamentos mensais
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/SalesResult'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.get("/sales-results", authMiddleware, async (req, res) => {
   try {
     const salesResults = await prisma.salesResult.findMany({
@@ -63,7 +189,31 @@ router.get("/sales-results", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/sales-results
+/**
+ * @swagger
+ * /sales-results:
+ *   post:
+ *     tags: [SalesResults]
+ *     summary: Cria um novo registro de faturamento mensal do usuário
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SalesResultCreate'
+ *     responses:
+ *       201:
+ *         description: Registro criado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SalesResult'
+ *       401:
+ *         description: Não autorizado
+ *       500:
+ *         description: Erro interno
+ */
 router.post("/sales-results", authMiddleware, async (req, res) => {
   try {
     const { month, value } = req.body; // month: "YYYY-MM", value: number
@@ -76,7 +226,29 @@ router.post("/sales-results", authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/sales-results/:id
+/**
+ * @swagger
+ * /sales-results/{id}:
+ *   delete:
+ *     tags: [SalesResults]
+ *     summary: Remove um registro de faturamento mensal do usuário
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID do registro
+ *     responses:
+ *       204:
+ *         description: Removido com sucesso (sem conteúdo)
+ *       401:
+ *         description: Não autorizado
+ *       404:
+ *         description: Não encontrado
+ *       500:
+ *         description: Erro interno
+ */
 router.delete("/sales-results/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;

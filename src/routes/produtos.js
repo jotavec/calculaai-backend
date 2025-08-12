@@ -1,9 +1,9 @@
+// src/routes/produtos.js
 const express = require("express");
 const router = express.Router();
 const { PrismaClient } = require("@prisma/client");
 const auth = require("../middleware/auth");
 const prisma = new PrismaClient();
-
 const multer = require("multer");
 const xml2js = require("xml2js");
 
@@ -44,7 +44,24 @@ async function bloqueiaMovimentacaoGratuito(req, res, next) {
   }
 }
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Produtos
+ *     description: Endpoints para gestão de matérias-primas/produtos.
+ */
+
 // LISTAR TODOS
+/**
+ * @swagger
+ * /produtos:
+ *   get:
+ *     tags: [Produtos]
+ *     summary: Lista todos os produtos
+ *     responses:
+ *       200:
+ *         description: Lista de produtos
+ */
 router.get("/", async (req, res) => {
   try {
     const produtos = await prisma.produto.findMany();
@@ -55,6 +72,13 @@ router.get("/", async (req, res) => {
 });
 
 // CRIAR NOVO PRODUTO ***LIMITADO PELO PLANO***
+/**
+ * @swagger
+ * /produtos:
+ *   post:
+ *     tags: [Produtos]
+ *     summary: Cria um novo produto (limitado pelo plano do usuário)
+ */
 router.post("/", auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -65,8 +89,6 @@ router.post("/", auth, async (req, res) => {
 
     let limite = Infinity;
     if (plano === "gratuito") limite = 30;
-    if (plano === "padrao") limite = Infinity;
-    if (plano === "premium") limite = Infinity;
 
     if (count >= limite) {
       return res.status(403).json({ error: "Limite de matérias-primas atingido no seu plano. Faça upgrade para cadastrar mais!" });
@@ -100,10 +122,8 @@ router.post("/", auth, async (req, res) => {
     totalEmbalagem = totalEmbalagem === undefined || totalEmbalagem === null ? "" : String(totalEmbalagem);
     estoqueMinimo = estoqueMinimo === undefined || estoqueMinimo === null ? "" : String(estoqueMinimo);
 
-    // --- AJUSTE PARA UNIDADE: sempre salva o value! ---
     if (unidadeLabelToValue[unidade]) unidade = unidadeLabelToValue[unidade];
 
-    // ---- CALCULA O CUSTO UNITÁRIO ----
     let custoUnitario = "0";
     if (Number(custoTotal) > 0 && Number(totalEmbalagem) > 0) {
       custoUnitario = (Number(custoTotal) / Number(totalEmbalagem)).toFixed(4);
@@ -124,7 +144,7 @@ router.post("/", auth, async (req, res) => {
         ativo,
         totalEmbalagem,
         estoqueMinimo,
-        userId // garante vínculo
+        userId
       },
     });
 
@@ -135,7 +155,7 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-// IMPORTAR PRODUTOS EM LOTE (PLANILHA) ***TAMBÉM LIMITA PLANO***
+// IMPORTAR PRODUTOS EM LOTE
 router.post("/importar", auth, async (req, res) => {
   try {
     const { produtos } = req.body;
@@ -145,7 +165,6 @@ router.post("/importar", auth, async (req, res) => {
       return res.status(400).json({ error: "Nenhum produto enviado" });
     }
 
-    // CAMPOS OBRIGATÓRIOS (igual à planilha)
     const obrigatorios = [
       "Código",
       "Nome*",
@@ -170,15 +189,11 @@ router.post("/importar", auth, async (req, res) => {
       );
     }
 
-    // === Limitação para importação também ===
-    // Conta quantos produtos já existem
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const plano = user?.plano || "gratuito";
     const count = await prisma.produto.count({ where: { userId } });
     let limite = Infinity;
     if (plano === "gratuito") limite = 30;
-    if (plano === "padrao") limite = Infinity;
-    if (plano === "premium") limite = Infinity;
 
     if ((count + produtos.length) > limite) {
       return res.status(403).json({ error: "Limite de matérias-primas atingido no seu plano. Faça upgrade para cadastrar mais!" });
@@ -201,46 +216,41 @@ router.post("/importar", auth, async (req, res) => {
       }
       if (erroLinha) continue;
 
-      // --- CRIA MARCA SE NÃO EXISTIR (modal) ---
-      const nomeMarca = getCampo(produto, "Marca*") || getCampo(produto, "Marca") || "";
+      const nomeMarca = getCampo(produto, "Marca*") || "";
       let marcaModal = await prisma.marca.findFirst({ where: { nome: nomeMarca, userId: String(userId) } });
       if (!marcaModal && nomeMarca) {
         marcaModal = await prisma.marca.create({ data: { nome: nomeMarca, userId: String(userId) } });
       }
 
-      // --- CRIA CATEGORIA SE NÃO EXISTIR (modal) ---
-      const nomeCategoria = getCampo(produto, "Categoria*") || getCampo(produto, "Categoria") || "";
+      const nomeCategoria = getCampo(produto, "Categoria*") || "";
       let categoriaModal = await prisma.categoria.findFirst({ where: { nome: nomeCategoria, userId: String(userId) } });
       if (!categoriaModal && nomeCategoria) {
         categoriaModal = await prisma.categoria.create({ data: { nome: nomeCategoria, userId: String(userId) } });
       }
 
-      // --------- CONVERTE LABEL DE UNIDADE PARA VALUE ----------
-      let unidadeBruta = String(getCampo(produto, "Unidade*") ?? getCampo(produto, "Unidade") ?? "");
+      let unidadeBruta = String(getCampo(produto, "Unidade*") ?? "");
       let unidade = unidadeLabelToValue[unidadeBruta] || unidadeBruta;
 
-      // ---- CALCULA O CUSTO UNITÁRIO ----
-      let custoTotal = String(getCampo(produto, "Custo Total*") ?? getCampo(produto, "Custo Total") ?? "0");
-      let totalEmbalagem = String(getCampo(produto, "Total Embalagem*") ?? getCampo(produto, "Total na Embalagem") ?? "");
+      let custoTotal = String(getCampo(produto, "Custo Total*") ?? "0");
+      let totalEmbalagem = String(getCampo(produto, "Total Embalagem*") ?? "");
       let custoUnitario = "0";
       if (Number(custoTotal) > 0 && Number(totalEmbalagem) > 0) {
         custoUnitario = (Number(custoTotal) / Number(totalEmbalagem)).toFixed(4);
       }
 
-      // CADASTRO REAL DO PRODUTO (apenas texto)
       const dados = {
         codigo: String(getCampo(produto, "Código") ?? ""),
         codBarras: String(getCampo(produto, "Código de Barras") ?? ""),
-        nome: String(getCampo(produto, "Nome*") ?? getCampo(produto, "Nome") ?? ""),
+        nome: String(getCampo(produto, "Nome*") ?? ""),
         categoria: String(nomeCategoria ?? ""),
         marca: String(nomeMarca ?? ""),
         unidade: unidade,
-        estoque: String(getCampo(produto, "Estoque*") ?? getCampo(produto, "Estoque") ?? "0"),
+        estoque: String(getCampo(produto, "Estoque*") ?? "0"),
         custoTotal: custoTotal,
         custoUnitario: custoUnitario,
         custo: "0",
-        ativo: String(getCampo(produto, "Ativo*") ?? getCampo(produto, "Ativo") ?? "1") === "1" ||
-          String(getCampo(produto, "Ativo*") ?? getCampo(produto, "Ativo")).toLowerCase() === "sim",
+        ativo: String(getCampo(produto, "Ativo*") ?? "1") === "1" ||
+          String(getCampo(produto, "Ativo*")).toLowerCase() === "sim",
         totalEmbalagem: totalEmbalagem,
         estoqueMinimo: String(getCampo(produto, "Estoque Mínimo") ?? ""),
         userId: String(userId)
@@ -268,18 +278,23 @@ router.post("/importar", auth, async (req, res) => {
   }
 });
 
-// EDITAR PRODUTO (sem limitação)
+// EDITAR PRODUTO
+/**
+ * @swagger
+ * /produtos/{id}:
+ *   put:
+ *     tags: [Produtos]
+ *     summary: Atualiza um produto pelo ID
+ */
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const dados = req.body;
 
-    // --- AJUSTE PARA UNIDADE: sempre salva o value! ---
     if (dados.unidade && unidadeLabelToValue[dados.unidade]) {
       dados.unidade = unidadeLabelToValue[dados.unidade];
     }
 
-    // ---- CALCULA O CUSTO UNITÁRIO ----
     let custoTotal = dados.custoTotal === undefined || dados.custoTotal === null ? "0" : String(dados.custoTotal);
     let totalEmbalagem = dados.totalEmbalagem === undefined || dados.totalEmbalagem === null ? "0" : String(dados.totalEmbalagem);
     let custoUnitario = "0";
@@ -310,7 +325,14 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETAR PRODUTO POR ID
+// DELETAR PRODUTO
+/**
+ * @swagger
+ * /produtos/{id}:
+ *   delete:
+ *     tags: [Produtos]
+ *     summary: Remove um produto pelo ID
+ */
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -324,8 +346,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ========== ENTRADA DE ESTOQUE ==========
-// *** BLOQUEIA PLANO GRATUITO ***
+// ENTRADA DE ESTOQUE
 router.post("/entrada-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, res) => {
   try {
     const { produtoId, quantidade, lote, valor, data } = req.body;
@@ -335,15 +356,12 @@ router.post("/entrada-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, 
       return res.status(400).json({ error: "Produto e quantidade obrigatórios." });
     }
 
-    // Busca o produto
     const produto = await prisma.produto.findUnique({ where: { id: produtoId } });
     if (!produto) return res.status(404).json({ error: "Produto não encontrado." });
 
-    // Atualiza o estoque do produto
     const estoqueAtual = Number(produto.estoque || 0);
     const novoEstoque = estoqueAtual + Number(quantidade);
 
-    // --- NOVO: Garantir data yyyy-MM-dd ---
     let dataEntradaFormatada = undefined;
     if (data) {
       if (typeof data === "string" && data.length >= 10) {
@@ -356,7 +374,6 @@ router.post("/entrada-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, 
       }
     }
 
-    // Salva entrada no histórico (tabela EntradaEstoque)
     const entrada = await prisma.entradaEstoque.create({
       data: {
         produtoId,
@@ -368,7 +385,6 @@ router.post("/entrada-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, 
       }
     });
 
-    // Atualiza o estoque e o custoTotal no Produto!
     await prisma.produto.update({
       where: { id: produtoId },
       data: {
@@ -386,8 +402,7 @@ router.post("/entrada-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, 
   }
 });
 
-// ========== SAÍDA DE ESTOQUE ==========
-// *** BLOQUEIA PLANO GRATUITO ***
+// SAÍDA DE ESTOQUE
 router.post("/saida-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, res) => {
   try {
     const { produtoId, quantidade } = req.body;
@@ -397,24 +412,20 @@ router.post("/saida-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, re
       return res.status(400).json({ error: "Produto e quantidade obrigatórios." });
     }
 
-    // Busca produto no banco
     const produto = await prisma.produto.findUnique({ where: { id: produtoId } });
     if (!produto) return res.status(404).json({ error: "Produto não encontrado" });
 
-    // Verifica se tem estoque suficiente
     const estoqueAtual = Number(produto.estoque || 0);
     if (estoqueAtual < Number(quantidade)) {
       return res.status(400).json({ error: "Estoque insuficiente" });
     }
 
-    // Atualiza o estoque (abate)
     const novoEstoque = estoqueAtual - Number(quantidade);
     await prisma.produto.update({
       where: { id: produtoId },
       data: { estoque: String(novoEstoque) }
     });
 
-    // REGISTRA A SAÍDA NO HISTÓRICO! (agora FUNCIONANDO)
     await prisma.saidaEstoque.create({
       data: {
         produtoId,
@@ -431,10 +442,10 @@ router.post("/saida-estoque", auth, bloqueiaMovimentacaoGratuito, async (req, re
   }
 });
 
+// HISTÓRICO DE ENTRADAS DE UM PRODUTO
 router.get('/:id/entradas', async (req, res) => {
   const { id } = req.params;
   try {
-    // Busca todas as entradas desse produto
     const entradas = await prisma.entradaEstoque.findMany({
       where: { produtoId: id },
       include: { user: { select: { name: true } } },
@@ -447,8 +458,7 @@ router.get('/:id/entradas', async (req, res) => {
   }
 });
 
-// =================== IMPORTAR XML DA NFE =======================
-// *** BLOQUEIA PLANO GRATUITO ***
+// IMPORTAR XML DA NFE
 router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.single("xml"), async (req, res) => {
   try {
     if (!req.file) {
@@ -463,20 +473,17 @@ router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.sing
         return res.status(400).json({ error: "Falha ao ler o XML" });
       }
 
-      // NFe pode estar em vários caminhos, tenta o padrão nacional
       let itens = [];
       try {
         const dets = result.nfeProc
-          ? result.nfeProc.NFe.infNFe.det // XML baixado da SEFAZ
-          : result.NFe.infNFe.det;        // XML assinado
-
+          ? result.nfeProc.NFe.infNFe.det
+          : result.NFe.infNFe.det;
         itens = Array.isArray(dets) ? dets : [dets];
       } catch (e) {
         return res.status(400).json({ error: "Produtos não encontrados no XML" });
       }
 
       const userId = req.userId;
-
       let produtosCriados = [];
       let erros = [];
 
@@ -489,9 +496,8 @@ router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.sing
           const valorUnitario = Number(prod.vUnCom || 0);
           const valorTotal = Number(prod.vProd || valorUnitario * quantidade);
 
-          if (!nome) continue; // Pula item inválido
+          if (!nome) continue;
 
-          // Procura se já existe pelo nome ou código de barras (ajuste se quiser)
           let produtoExistente = await prisma.produto.findFirst({
             where: {
               OR: [
@@ -502,7 +508,6 @@ router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.sing
           });
 
           if (produtoExistente) {
-            // Atualiza estoque e valor se desejar!
             await prisma.produto.update({
               where: { id: produtoExistente.id },
               data: {
@@ -512,7 +517,6 @@ router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.sing
             });
             produtosCriados.push({ nome, atualizado: true });
           } else {
-            // Cria novo produto (bem simples, pode enriquecer depois)
             await prisma.produto.create({
               data: {
                 nome,
@@ -526,7 +530,7 @@ router.post("/importar-xml-nfe", auth, bloqueiaMovimentacaoGratuito, upload.sing
                 ativo: true,
                 totalEmbalagem: "",
                 estoqueMinimo: "",
-                userId: userId // Adicione aqui se seu model exigir
+                userId: userId
               }
             });
             produtosCriados.push({ nome, criado: true });

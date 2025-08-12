@@ -1,3 +1,4 @@
+// src/routes/receitas.js
 const express = require('express');
 const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
@@ -27,9 +28,28 @@ function normalizeBlocoAtivo(valor) {
   return String(valor);
 }
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Receitas
+ *     description: Endpoints para gestão de receitas
+ *   - name: Tipos de Produto
+ *     description: Endpoints para gestão de tipos de produto
+ */
+
 // =========================
-// LISTAR TODAS AS RECEITAS DO USUÁRIO (SEM INCLUDE!)
+// LISTAR TODAS AS RECEITAS
 // =========================
+/**
+ * @swagger
+ * /receitas:
+ *   get:
+ *     tags: [Receitas]
+ *     summary: Lista todas as receitas do usuário autenticado
+ *     responses:
+ *       200:
+ *         description: Lista de receitas
+ */
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -48,13 +68,19 @@ router.get('/', auth, async (req, res) => {
 });
 
 // =========================
-// CRIAR NOVA RECEITA (agora com LIMITAÇÃO DE PLANO!)
+// CRIAR NOVA RECEITA
 // =========================
+/**
+ * @swagger
+ * /receitas:
+ *   post:
+ *     tags: [Receitas]
+ *     summary: Cria uma nova receita (limitada pelo plano do usuário)
+ */
 router.post('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
 
-    // ====== VERIFICA LIMITE PELO PLANO ======
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const plano = user?.plano || "gratuito";
     const count = await prisma.recipe.count({ where: { userId } });
@@ -62,37 +88,19 @@ router.post('/', auth, async (req, res) => {
     let limite = Infinity;
     if (plano === "gratuito") limite = 5;
     if (plano === "padrao") limite = 60;
-    if (plano === "premium") limite = Infinity;
 
     if (count >= limite) {
       return res.status(403).json({ error: "Limite de receitas atingido no seu plano. Faça upgrade para cadastrar mais!" });
     }
 
-    // ==== CONTINUA CADASTRO NORMAL ====
     let {
-      nome,
-      rendimentoNumero,
-      rendimentoUnidade,
-      observacoes,
-      ingredientes,
-      embalagens,
-      subReceitas,
-      maoDeObra,
-      imagemFinal,
-      conservacaoData,
-      passosPreparo,
-      tipoSelecionado,
-      dataUltimaAtualizacao,
-      tempoTotal,
-      tempoUnidade,
-      precoVenda,
-      pesoUnitario,
-      descontoReais,
-      descontoPercentual,
-      blocoMarkupAtivo
+      nome, rendimentoNumero, rendimentoUnidade, observacoes,
+      ingredientes, embalagens, subReceitas, maoDeObra, imagemFinal,
+      conservacaoData, passosPreparo, tipoSelecionado, dataUltimaAtualizacao,
+      tempoTotal, tempoUnidade, precoVenda, pesoUnitario,
+      descontoReais, descontoPercentual, blocoMarkupAtivo
     } = req.body;
 
-    // Salva imagem base64 se veio
     if (imagemFinal && typeof imagemFinal === "string" && imagemFinal.startsWith("data:image")) {
       imagemFinal = salvarImagemBase64(imagemFinal, `receita_${userId}`);
     }
@@ -104,10 +112,10 @@ router.post('/', auth, async (req, res) => {
         yieldQty: Number(rendimentoNumero || 0),
         yieldUnit: rendimentoUnidade,
         notes: observacoes || '',
-        ingredientes: ingredientes ? ingredientes : [],
-        embalagens: embalagens ? embalagens : [],
-        subReceitas: subReceitas ? subReceitas : [],
-        maoDeObra: maoDeObra ? maoDeObra : [],
+        ingredientes: ingredientes || [],
+        embalagens: embalagens || [],
+        subReceitas: subReceitas || [],
+        maoDeObra: maoDeObra || [],
         imagemFinal: imagemFinal || null,
         conservacaoData: conservacaoData || null,
         passosPreparo: passosPreparo || null,
@@ -136,34 +144,25 @@ router.post('/', auth, async (req, res) => {
 // =========================
 // ATUALIZAR RECEITA
 // =========================
+/**
+ * @swagger
+ * /receitas/{id}:
+ *   put:
+ *     tags: [Receitas]
+ *     summary: Atualiza uma receita pelo ID
+ */
 router.put('/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
     let {
-      nome,
-      rendimentoNumero,
-      rendimentoUnidade,
-      observacoes,
-      ingredientes,
-      embalagens,
-      subReceitas,
-      maoDeObra,
-      imagemFinal,
-      conservacaoData,
-      passosPreparo,
-      tipoSelecionado,
-      dataUltimaAtualizacao,
-      tempoTotal,
-      tempoUnidade,
-      precoVenda,
-      pesoUnitario,
-      descontoReais,
-      descontoPercentual,
-      blocoMarkupAtivo
+      nome, rendimentoNumero, rendimentoUnidade, observacoes,
+      ingredientes, embalagens, subReceitas, maoDeObra, imagemFinal,
+      conservacaoData, passosPreparo, tipoSelecionado, dataUltimaAtualizacao,
+      tempoTotal, tempoUnidade, precoVenda, pesoUnitario,
+      descontoReais, descontoPercentual, blocoMarkupAtivo
     } = req.body;
 
-    // Salva imagem base64 se veio
     if (imagemFinal && typeof imagemFinal === "string" && imagemFinal.startsWith("data:image")) {
       imagemFinal = salvarImagemBase64(imagemFinal, `receita_${userId}`);
     }
@@ -175,10 +174,10 @@ router.put('/:id', auth, async (req, res) => {
         yieldQty: Number(rendimentoNumero || 0),
         yieldUnit: rendimentoUnidade,
         notes: observacoes || '',
-        ingredientes: ingredientes ? ingredientes : [],
-        embalagens: embalagens ? embalagens : [],
-        subReceitas: subReceitas ? subReceitas : [],
-        maoDeObra: maoDeObra ? maoDeObra : [],
+        ingredientes: ingredientes || [],
+        embalagens: embalagens || [],
+        subReceitas: subReceitas || [],
+        maoDeObra: maoDeObra || [],
         imagemFinal: imagemFinal || null,
         conservacaoData: conservacaoData || null,
         passosPreparo: passosPreparo || null,
@@ -207,6 +206,13 @@ router.put('/:id', auth, async (req, res) => {
 // =========================
 // DELETAR RECEITA
 // =========================
+/**
+ * @swagger
+ * /receitas/{id}:
+ *   delete:
+ *     tags: [Receitas]
+ *     summary: Remove uma receita pelo ID
+ */
 router.delete('/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -222,9 +228,15 @@ router.delete('/:id', auth, async (req, res) => {
 });
 
 // =========================
-// ROTAS DE TIPO DE PRODUTO (NO MESMO ARQUIVO, PRA TESTE)
+// LISTAR TIPOS DE PRODUTO
 // =========================
-
+/**
+ * @swagger
+ * /receitas/tipos-produto:
+ *   get:
+ *     tags: [Tipos de Produto]
+ *     summary: Lista todos os tipos de produto do usuário autenticado
+ */
 router.get('/tipos-produto', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -239,6 +251,16 @@ router.get('/tipos-produto', auth, async (req, res) => {
   }
 });
 
+// =========================
+// CRIAR TIPO DE PRODUTO
+// =========================
+/**
+ * @swagger
+ * /receitas/tipos-produto:
+ *   post:
+ *     tags: [Tipos de Produto]
+ *     summary: Cria um novo tipo de produto
+ */
 router.post('/tipos-produto', auth, async (req, res) => {
   try {
     const userId = req.userId;
@@ -259,6 +281,16 @@ router.post('/tipos-produto', auth, async (req, res) => {
   }
 });
 
+// =========================
+// DELETAR TIPO DE PRODUTO
+// =========================
+/**
+ * @swagger
+ * /receitas/tipos-produto/{id}:
+ *   delete:
+ *     tags: [Tipos de Produto]
+ *     summary: Remove um tipo de produto pelo ID
+ */
 router.delete('/tipos-produto/:id', auth, async (req, res) => {
   try {
     const userId = req.userId;
