@@ -3,7 +3,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const auth = require("../middleware/auth");
+const { requireAuth } = require('../middleware/auth'); // <- importa a função certa
 const salvarImagem = require('../util/salvarImagem');
 
 const router = express.Router();
@@ -22,7 +22,7 @@ const upload = multer({
 // ---------------------------------------------
 router.post(
   '/receita',
-  authMiddleware,
+  requireAuth,
   upload.single('file'),
   async (req, res) => {
     try {
@@ -58,7 +58,7 @@ router.post(
 // ---------------------------------------------
 router.post(
   '/avatar',
-  authMiddleware,
+  requireAuth,
   upload.single('file'),
   async (req, res) => {
     try {
