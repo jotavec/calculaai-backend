@@ -12,19 +12,9 @@ const axios = require('axios');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Swagger (protege a importação para não derrubar o servidor se der erro)
-let swaggerUi, swaggerSpec;
-try {
-  ({ swaggerUi, swaggerSpec } = require('./swagger'));
-} catch (e) {
-  console.warn('Swagger desabilitado:', e.message);
-  // middlewares no-op para não quebrar /docs e /docs-json
-  swaggerUi = {
-    serve: (req, res, next) => next(),
-    setup: () => (req, res, next) => next(),
-  };
-  swaggerSpec = { openapi: '3.0.0', info: { title: 'API', version: '1.0.0' } };
-}
+// Swagger OFF temporário para isolar erro de deploy
+const swaggerUi = { serve: (req, res, next) => next(), setup: () => (req, res, next) => next() };
+const swaggerSpec = { openapi: '3.0.0', info: { title: 'API', version: '1.0.0' } };
 
 // Middlewares próprios
 const errorHandler = require('./src/middleware/errorHandler');
@@ -43,7 +33,7 @@ const preferenciasRoutes = require('./src/routes/preferenciasRoutes');
 const fornecedorRoutes = require('./src/routes/fornecedores');
 const movimentacoesRoutes = require('./src/routes/movimentacoes');
 const receitasRoutes = require('./src/routes/receitas');
-const uploadsReceitaRoutes = require('./src/routes/uploadsReceita'); // <- rotas de upload
+const uploadsReceitaRoutes = require('./src/routes/uploadsReceita');
 const rotuloNutricionalRoutes = require('./src/routes/rotuloNutricional');
 const categoriasNutricionaisRouter = require('./src/routes/categoriasNutricionais');
 const mercadopagoRoutes = require('./src/routes/mercadopagoRoutes');
@@ -51,18 +41,11 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 
 const app = express();
 
-/* Boas práticas em produção */
-app.disable('x-powered-by');
-app.set('trust proxy', 1); // cookies secure por trás do proxy (Render)
-
-/* ==================== CORS ======================
- * Em produção, defina FRONTEND_ORIGIN (e _2, _3 se precisar).
- * Em desenvolvimento, liberamos as portas locais usadas (Vite e build).
- */
+/* ==================== CORS ====================== */
 const STATIC_ALLOWED = [
-  'http://localhost:5173',   // Vite dev
-  'http://localhost:4173',   // Vite preview
-  'http://localhost:60378',  // build servido por "serve -s dist"
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://localhost:60378',
 ];
 
 const ENV_ALLOWED = [
@@ -75,37 +58,21 @@ const allowedList = new Set([...STATIC_ALLOWED, ...ENV_ALLOWED]);
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Requests sem origin (ex.: Postman) — permite
     if (!origin) return callback(null, true);
-
-    // Lista explícita
     if (allowedList.has(origin)) return callback(null, true);
-
-    // Previews do Vercel (*.vercel.app) — opcional, facilita testes
     if (/^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)) {
       return callback(null, true);
     }
-
-    // Caso queira liberar temporariamente TUDO durante testes, descomente:
-    // return callback(null, true);
-
     return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // preflight amplo
 /* =============================================== */
 
 /**
  * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
- * Mantemos os DOIS diretórios:
- * 1) public/uploads      -> uploads de receitas (ex.: imagens de receitas)
- * 2) uploads             -> legado (ex.: avatars)
- * E criamos aliases explícitos para evitar confusão:
- *   - /uploads/receitas  -> public/uploads/receitas
- *   - /uploads/avatars   -> uploads/avatars
  */
 const uploadsPublic = path.join(__dirname, 'public', 'uploads');
 const uploadsLegacy = path.join(__dirname, 'uploads');
@@ -113,25 +80,18 @@ const uploadsLegacy = path.join(__dirname, 'uploads');
 app.use('/uploads', express.static(uploadsPublic, { maxAge: '1d', fallthrough: true }));
 app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
 
-// Aliases explícitos (opcionais, mas ajudam a manter a separação clara)
 app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
-app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
+app.use('/uploads/avatars',  express.static(path.join(uploadsLegacy, 'avatars'),  { maxAge: '1d' }));
 
 // Parsers
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 
-// Swagger UI (declare APENAS UMA vez)
+// Swagger (no-op)
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// JSON do OpenAPI (dois aliases pra facilitar testes)
-app.get('/openapi.json', (_req, res) => {
-  res.type('application/json').send(swaggerSpec);
-});
-app.get('/docs-json', (_req, res) => {
-  res.type('application/json').send(swaggerSpec);
-});
+app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
+app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
 
 /* =================== ROTAS PRINCIPAIS =================== */
 app.use('/api/despesasfixas', despesasFixasRoutes);
@@ -148,7 +108,7 @@ app.use('/api/movimentacoes', movimentacoesRoutes);
 app.use('/api/receitas', receitasRoutes);
 app.use('/api/rotulo-nutricional', rotuloNutricionalRoutes);
 app.use('/api/categorias-nutricionais', categoriasNutricionaisRouter);
-app.use('/api/uploads', uploadsReceitaRoutes); // <- AQUI estão os endpoints de upload
+app.use('/api/uploads', uploadsReceitaRoutes);
 app.use('/api/mercadopago', mercadopagoRoutes);
 app.use('/api/sugestoes', sugestoesRoutes);
 
@@ -287,21 +247,8 @@ app.get('/api/company-config', auth, async (req, res) => {
 app.post('/api/company-config', auth, async (req, res) => {
   const userId = req.userId;
   const {
-    companyName,
-    cnpj,
-    phone,
-    cep,
-    rua,
-    numero,
-    bairro,
-    cidade,
-    estado,
-    rentCost,
-    energyCost,
-    salaryCost,
-    defaultMarkup,
-    defaultTax,
-    defaultCommission,
+    companyName, cnpj, phone, cep, rua, numero, bairro, cidade, estado,
+    rentCost, energyCost, salaryCost, defaultMarkup, defaultTax, defaultCommission,
   } = req.body;
 
   try {
@@ -318,7 +265,8 @@ app.post('/api/company-config', auth, async (req, res) => {
     } else {
       config = await prisma.companyConfig.create({
         data: {
-          userId, companyName, cnpj, phone, cep, rua, numero, bairro, cidade, estado,
+          userId,
+          companyName, cnpj, phone, cep, rua, numero, bairro, cidade, estado,
           rentCost, energyCost, salaryCost, defaultMarkup, defaultTax, defaultCommission,
         },
       });
@@ -366,15 +314,7 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
 });
 
 /**
- * @swagger
- * /health:
- *   get:
- *     tags:
- *       - Health
- *     summary: Health check
- *     responses:
- *       200:
- *         description: OK
+ * Health check
  */
 app.get('/health', (_req, res) => {
   res.send({ status: 'ok' });
