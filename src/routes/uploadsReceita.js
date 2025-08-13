@@ -3,7 +3,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const authMiddleware = require('../middlewares/auth');
+const auth = require("../middleware/auth");
 const salvarImagem = require('../util/salvarImagem');
 
 const router = express.Router();
