@@ -1,9 +1,36 @@
 // src/util/salvarImagem.js
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+// Upload de arquivos para Cloudflare R2 usando AWS SDK v3
+// Retorna a URL pública do arquivo
+
 const path = require('path');
 const crypto = require('crypto');
+const {
+  S3Client,
+  PutObjectCommand,
+} = require('@aws-sdk/client-s3');
 
-// Inicialização do cliente S3 da forma correta e simplificada
+// ----- ENV OBRIGATÓRIAS -----
+// R2_ACCESS_KEY_ID
+// R2_SECRET_ACCESS_KEY
+// R2_BUCKET
+// R2_ENDPOINT              (ex.: https://<id>.r2.cloudflarestorage.com)
+// R2_PUBLIC_URL_PREFIX     (ex.: https://pub-xxxxxx.r2.dev/calculaai-uploads)
+const REQUIRED_ENVS = [
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET',
+  'R2_ENDPOINT',
+  'R2_PUBLIC_URL_PREFIX',
+];
+
+for (const k of REQUIRED_ENVS) {
+  if (!process.env[k]) {
+    /* eslint-disable no-console */
+    console.error(`[salvarImagem] Variável de ambiente ausente: ${k}`);
+    /* eslint-enable no-console */
+  }
+}
+
 const s3 = new S3Client({
   region: 'auto',
   endpoint: process.env.R2_ENDPOINT,
@@ -11,31 +38,44 @@ const s3 = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
+  forcePathStyle: true,
 });
 
 /**
- * Salva um buffer de imagem no Cloudflare R2 e retorna a URL pública.
- * @param {Buffer} fileBuffer O buffer do arquivo de imagem.
- * @param {string} originalName O nome original do arquivo para pegar a extensão.
- * @param {string} mimeType O MIME type do arquivo (ex: 'image/jpeg').
- * @returns {Promise<string>} A URL pública completa da imagem salva.
+ * Faz upload no bucket R2 e retorna a URL pública.
+ * @param {Buffer} buffer - conteúdo do arquivo
+ * @param {string} originalName - nome original (para extrair a extensão)
+ * @param {string} mimeType - content-type
+ * @param {string} keyPrefix - subpasta dentro do bucket (ex.: 'uploads/receitas')
+ * @returns {Promise<string>} URL pública do arquivo
  */
-async function salvarImagem(fileBuffer, originalName, mimeType) {
-  // Gera um nome de arquivo único para evitar conflitos
-  const ext = path.extname(originalName || '') || '.jpg';
-  const key = `${crypto.randomUUID()}${ext}`;
+async function salvarImagem(buffer, originalName, mimeType, keyPrefix = 'uploads/receitas') {
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    throw new Error('[salvarImagem] Buffer inválido.');
+  }
 
-  // Prepara e envia o comando de upload para o R2
-  await s3.send(new PutObjectCommand({
-    Bucket: process.env.R2_BUCKET,
+  const bucket = process.env.R2_BUCKET;
+  const pub = (process.env.R2_PUBLIC_URL_PREFIX || '').replace(/\/+$/, '');
+
+  const ext = path.extname(originalName || '') || '';
+  const hash = crypto.randomBytes(6).toString('hex');
+  const timestamp = Date.now();
+
+  const key = `${String(keyPrefix).replace(/^\/+|\/+$/g, '')}/${timestamp}-${hash}${ext}`
+    .replace(/\/{2,}/g, '/');
+
+  const put = new PutObjectCommand({
+    Bucket: bucket,
     Key: key,
-    Body: fileBuffer,
-    ContentType: mimeType,
-  }));
+    Body: buffer,
+    ContentType: mimeType || 'application/octet-stream',
+  });
 
-  // Monta a URL pública final
-  const base = (process.env.R2_PUBLIC_URL_PREFIX || '').replace(/\/+$/, '');
-  return `${base}/${key}`;
+  await s3.send(put);
+
+  // Como já habilitamos a URL pública (R2_PUBLIC_URL_PREFIX), é só concatenar:
+  const url = `${pub}/${key}`;
+  return url;
 }
 
 module.exports = salvarImagem;
