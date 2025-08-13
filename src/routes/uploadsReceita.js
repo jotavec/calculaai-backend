@@ -1,6 +1,4 @@
-// src/routes/uploadsReceita.js
-// Rotas de upload (memória) salvando no Cloudflare R2
-
+// Rotas de upload para Cloudflare R2 usando multer (memória)
 const express = require('express');
 const multer = require('multer');
 const requireAuth = require('../middleware/auth');
@@ -8,16 +6,15 @@ const salvarImagem = require('../util/salvarImagem');
 
 const router = express.Router();
 
-// Armazena em memória (sem salvar no disco)
+// Armazena em memória (não escreve no disco)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10 MB
-  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
 // ---------------------------------------------
-// POST /api/uploads/receita  (campo: file)
+// POST /api/uploads/receita
+// campo: file
 // ---------------------------------------------
 router.post(
   '/receita',
@@ -28,7 +25,6 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ message: 'Arquivo não enviado (campo "file").' });
       }
-
       const { buffer, originalname, mimetype } = req.file;
 
       const url = await salvarImagem(
@@ -47,7 +43,8 @@ router.post(
 );
 
 // ---------------------------------------------
-// POST /api/uploads/avatar  (campo: file)
+// POST /api/uploads/avatar
+// campo: file
 // ---------------------------------------------
 router.post(
   '/avatar',
@@ -58,7 +55,6 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ message: 'Arquivo não enviado (campo "file").' });
       }
-
       const { buffer, originalname, mimetype } = req.file;
 
       const url = await salvarImagem(
