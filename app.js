@@ -43,13 +43,17 @@ const preferenciasRoutes = require('./src/routes/preferenciasRoutes');
 const fornecedorRoutes = require('./src/routes/fornecedores');
 const movimentacoesRoutes = require('./src/routes/movimentacoes');
 const receitasRoutes = require('./src/routes/receitas');
-const uploadsReceitaRoutes = require('./src/routes/uploadsReceita');
+const uploadsReceitaRoutes = require('./src/routes/uploadsReceita'); // <- rotas de upload
 const rotuloNutricionalRoutes = require('./src/routes/rotuloNutricional');
 const categoriasNutricionaisRouter = require('./src/routes/categoriasNutricionais');
 const mercadopagoRoutes = require('./src/routes/mercadopagoRoutes');
 const sugestoesRoutes = require('./src/routes/sugestoes');
 
 const app = express();
+
+/* Boas práticas em produção */
+app.disable('x-powered-by');
+app.set('trust proxy', 1); // cookies secure por trás do proxy (Render)
 
 /* ==================== CORS ======================
  * Em produção, defina FRONTEND_ORIGIN (e _2, _3 se precisar).
@@ -91,6 +95,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // preflight amplo
 /* =============================================== */
 
 /**
@@ -143,7 +148,7 @@ app.use('/api/movimentacoes', movimentacoesRoutes);
 app.use('/api/receitas', receitasRoutes);
 app.use('/api/rotulo-nutricional', rotuloNutricionalRoutes);
 app.use('/api/categorias-nutricionais', categoriasNutricionaisRouter);
-app.use('/api/uploads', uploadsReceitaRoutes);
+app.use('/api/uploads', uploadsReceitaRoutes); // <- AQUI estão os endpoints de upload
 app.use('/api/mercadopago', mercadopagoRoutes);
 app.use('/api/sugestoes', sugestoesRoutes);
 
@@ -306,42 +311,15 @@ app.post('/api/company-config', auth, async (req, res) => {
       config = await prisma.companyConfig.update({
         where: { userId },
         data: {
-          companyName,
-          cnpj,
-          phone,
-          cep,
-          rua,
-          numero,
-          bairro,
-          cidade,
-          estado,
-          rentCost,
-          energyCost,
-          salaryCost,
-          defaultMarkup,
-          defaultTax,
-          defaultCommission,
+          companyName, cnpj, phone, cep, rua, numero, bairro, cidade, estado,
+          rentCost, energyCost, salaryCost, defaultMarkup, defaultTax, defaultCommission,
         },
       });
     } else {
       config = await prisma.companyConfig.create({
         data: {
-          userId,
-          companyName,
-          cnpj,
-          phone,
-          cep,
-          rua,
-          numero,
-          bairro,
-          cidade,
-          estado,
-          rentCost,
-          energyCost,
-          salaryCost,
-          defaultMarkup,
-          defaultTax,
-          defaultCommission,
+          userId, companyName, cnpj, phone, cep, rua, numero, bairro, cidade, estado,
+          rentCost, energyCost, salaryCost, defaultMarkup, defaultTax, defaultCommission,
         },
       });
     }
