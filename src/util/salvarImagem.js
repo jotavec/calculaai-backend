@@ -1,81 +1,67 @@
 // src/util/salvarImagem.js
-// Upload de arquivos para Cloudflare R2 usando AWS SDK v3
-// Retorna a URL pública do arquivo
+// Envia um buffer para o Cloudflare R2 e retorna a URL pública
 
 const path = require('path');
 const crypto = require('crypto');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { NodeHttpHandler } = require('@smithy/node-http-handler');
+const https = require('https');
+
 const {
-  S3Client,
-  PutObjectCommand,
-} = require('@aws-sdk/client-s3');
+  R2_ENDPOINT,
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY,
+  R2_BUCKET,
+  R2_PUBLIC_URL_PREFIX, // precisa incluir o bucket: ex: https://pub-xxxx.r2.dev/seu-bucket
+} = process.env;
 
-// ----- ENV OBRIGATÓRIAS -----
-// R2_ACCESS_KEY_ID
-// R2_SECRET_ACCESS_KEY
-// R2_BUCKET
-// R2_ENDPOINT              (ex.: https://<id>.r2.cloudflarestorage.com)
-// R2_PUBLIC_URL_PREFIX     (ex.: https://pub-xxxxxx.r2.dev/calculaai-uploads)
-const REQUIRED_ENVS = [
-  'R2_ACCESS_KEY_ID',
-  'R2_SECRET_ACCESS_KEY',
-  'R2_BUCKET',
-  'R2_ENDPOINT',
-  'R2_PUBLIC_URL_PREFIX',
-];
-
-for (const k of REQUIRED_ENVS) {
-  if (!process.env[k]) {
-    /* eslint-disable no-console */
-    console.error(`[salvarImagem] Variável de ambiente ausente: ${k}`);
-    /* eslint-enable no-console */
-  }
-}
-
+// Cliente S3 (R2) — TLS >= 1.2 e path-style habilitado
 const s3 = new S3Client({
   region: 'auto',
-  endpoint: process.env.R2_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
+  endpoint: R2_ENDPOINT,
   forcePathStyle: true,
+  requestHandler: new NodeHttpHandler({
+    httpsAgent: new https.Agent({ keepAlive: true, minVersion: 'TLSv1.2' }),
+  }),
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
 });
 
 /**
- * Faz upload no bucket R2 e retorna a URL pública.
+ * Salva um arquivo (buffer) no R2.
  * @param {Buffer} buffer - conteúdo do arquivo
- * @param {string} originalName - nome original (para extrair a extensão)
- * @param {string} mimeType - content-type
- * @param {string} keyPrefix - subpasta dentro do bucket (ex.: 'uploads/receitas')
+ * @param {string} originalname - nome original para slug/ extensão
+ * @param {string} mimetype - Content-Type
+ * @param {string} basePath - pasta (ex: 'uploads/receitas')
  * @returns {Promise<string>} URL pública do arquivo
  */
-async function salvarImagem(buffer, originalName, mimeType, keyPrefix = 'uploads/receitas') {
-  if (!buffer || !Buffer.isBuffer(buffer)) {
-    throw new Error('[salvarImagem] Buffer inválido.');
-  }
+async function salvarImagem(buffer, originalname, mimetype, basePath) {
+  // Normaliza nome + extensão
+  const ext = (path.extname(originalname) || '').toLowerCase();
+  const nameOnly = (path.basename(originalname, ext) || 'file')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-_]/g, '');
 
-  const bucket = process.env.R2_BUCKET;
-  const pub = (process.env.R2_PUBLIC_URL_PREFIX || '').replace(/\/+$/, '');
+  const stamp = Date.now();
+  const rand = crypto.randomBytes(4).toString('hex');
 
-  const ext = path.extname(originalName || '') || '';
-  const hash = crypto.randomBytes(6).toString('hex');
-  const timestamp = Date.now();
+  const key = `${basePath.replace(/^\/+|\/+$/g, '')}/${stamp}-${rand}-${nameOnly}${ext || ''}`;
 
-  const key = `${String(keyPrefix).replace(/^\/+|\/+$/g, '')}/${timestamp}-${hash}${ext}`
-    .replace(/\/{2,}/g, '/');
-
-  const put = new PutObjectCommand({
-    Bucket: bucket,
+  // Envia para o bucket
+  await s3.send(new PutObjectCommand({
+    Bucket: R2_BUCKET,
     Key: key,
     Body: buffer,
-    ContentType: mimeType || 'application/octet-stream',
-  });
+    ContentType: mimetype || 'application/octet-stream',
+    ACL: 'private', // público será entregue pelo domínio / prefixo público
+  }));
 
-  await s3.send(put);
-
-  // Como já habilitamos a URL pública (R2_PUBLIC_URL_PREFIX), é só concatenar:
-  const url = `${pub}/${key}`;
-  return url;
+  // Monta URL pública (prefixo já deve conter o bucket)
+  const prefix = (R2_PUBLIC_URL_PREFIX || '').replace(/\/+$/, '');
+  return `${prefix}/${key}`;
 }
 
 module.exports = salvarImagem;
