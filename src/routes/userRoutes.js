@@ -6,6 +6,10 @@ const { PrismaClient } = require("@prisma/client");
 const multer = require("multer");
 const path = require("path");
 
+// ====== TLS agent para Cloudflare R2 (evita EPROTO/handshake) ======
+const https = require("https");
+const { NodeHttpHandler } = require("@smithy/node-http-handler");
+
 // ---- S3 (Cloudflare R2) ----
 const {
   S3Client,
@@ -13,25 +17,12 @@ const {
   DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
 
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
+const R2_ENDPOINT = (process.env.R2_ENDPOINT || "").replace(/\/+$/, "");
 const R2_BUCKET = process.env.R2_BUCKET;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+// PRECISA incluir o nome do bucket no final, ex.: https://pub-xxxx.r2.dev/seu-bucket
 const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, "");
-
-// cria client do R2 se tudo estiver configurado
-const s3 =
-  R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
-    ? new S3Client({
-        region: "auto",
-        endpoint: R2_ENDPOINT,
-        forcePathStyle: true,
-        credentials: {
-          accessKeyId: R2_ACCESS_KEY_ID,
-          secretAccessKey: R2_SECRET_ACCESS_KEY,
-        },
-      })
-    : null;
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -40,11 +31,7 @@ const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
 const TOKEN_DIAS = 7;
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
-// ====== COOKIES EM PRODUÇÃO ======
-// Você disse que NÃO usa local. Então já travamos em produção:
-// - secure: true (HTTPS)
-// - sameSite: "none" (cross-site com frontend em outro domínio)
-// Opcional: ajustar domínio fixo com COOKIE_DOMAIN (ex: .seu-dominio.com)
+// ====== Cookies cross-site (frontend em domínio diferente) ======
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim();
 const cookieOpts = {
   httpOnly: true,
@@ -54,69 +41,6 @@ const cookieOpts = {
   maxAge: TOKEN_TTL_MS,
   ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
 };
-
-/**
- * @swagger
- * tags:
- *   - name: Users
- *     description: Rotas de usuários
- *
- * components:
- *   securitySchemes:
- *     cookieAuth:
- *       type: apiKey
- *       in: cookie
- *       name: token
- *     bearerAuth:
- *       type: http
- *       scheme: bearer
- *       bearerFormat: JWT
- *   schemas:
- *     User:
- *       type: object
- *       properties:
- *         id: { type: string }
- *         name: { type: string }
- *         email: { type: string, format: email }
- *         cpf: { type: string, nullable: true }
- *         telefone: { type: string, nullable: true }
- *         avatarUrl: { type: string, nullable: true }
- *     UserCreate:
- *       type: object
- *       required: [name, email, password]
- *       properties:
- *         name: { type: string }
- *         email: { type: string, format: email }
- *         password: { type: string, format: password }
- *         cpf: { type: string }
- *         telefone: { type: string }
- *     LoginRequest:
- *       type: object
- *       required: [email, password]
- *       properties:
- *         email: { type: string, format: email }
- *         password: { type: string, format: password }
- *     UserUpdate:
- *       type: object
- *       properties:
- *         name: { type: string }
- *         email: { type: string, format: email }
- *         cpf: { type: string }
- *         telefone: { type: string }
- *     ChangePassword:
- *       type: object
- *       required: [senhaNova]
- *       properties:
- *         senhaNova: { type: string, minLength: 6 }
- *     FiltroFaturamentoSave:
- *       type: object
- *       required: [filtro]
- *       properties:
- *         filtro: { type: string, example: "6" }
- */
-
-// Healthcheck
-router.get("/debug-existe", (_req, res) => res.send({ ok: true }));
 
 // ---------- Multer (avatar em memória) ----------
 const upload = multer({
@@ -162,9 +86,40 @@ function keyFromPublicUrl(url) {
   return key || null;
 }
 
+// ---------- S3 Client (R2) ----------
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50,
+  minVersion: "TLSv1.2",
+});
+
+const s3 =
+  R2_ENDPOINT && R2_BUCKET && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
+    ? new S3Client({
+        region: "auto",
+        endpoint: R2_ENDPOINT,
+        forcePathStyle: true,
+        requestHandler: new NodeHttpHandler({ httpsAgent }),
+        credentials: {
+          accessKeyId: R2_ACCESS_KEY_ID,
+          secretAccessKey: R2_SECRET_ACCESS_KEY,
+        },
+      })
+    : null;
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Users
+ *     description: Rotas de usuários
+ */
+
+// Healthcheck
+router.get("/debug-existe", (_req, res) => res.send({ ok: true }));
+
 // ---------- Rotas ----------
 
-// Cadastro (inclui cpf/telefone)
+// Cadastro
 router.post("/", async (req, res) => {
   const { name, email, password, cpf, telefone } = req.body || {};
   if (!name || !email || !password) {
@@ -194,7 +149,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Login (suporta passwordHash ou 'senha' legado)
+// Login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email e senha obrigatórios." });
@@ -232,7 +187,7 @@ router.get("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// Atualizar perfil do próprio usuário
+// Atualizar perfil
 router.put("/me", authMiddleware, async (req, res) => {
   try {
     const { name, email, cpf, telefone } = req.body || {};
@@ -248,7 +203,40 @@ router.put("/me", authMiddleware, async (req, res) => {
   }
 });
 
-// Upload de avatar para R2
+// ===== NOVO: definir avatar pré-definido (sem upload/R2)
+const ALLOWED_PRESETS = new Set([
+  "confeiteiro",
+  "mecanico",
+  "medico",
+  "engenheiro",
+  "chef",
+  "atendente",
+  "padeiro",
+  "default"
+]);
+
+router.post("/me/avatar-preset", authMiddleware, async (req, res) => {
+  try {
+    const { preset } = req.body || {};
+    const key = String(preset || "").toLowerCase().trim();
+    if (!key || !ALLOWED_PRESETS.has(key)) {
+      return res.status(400).json({ error: "Preset inválido." });
+    }
+
+    const val = `preset:${key}`;
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { avatarUrl: val },
+    });
+
+    return res.json({ ok: true, avatarUrl: val });
+  } catch (error) {
+    console.error("[users/avatar-preset]", error);
+    res.status(500).json({ error: "Erro ao definir avatar." });
+  }
+});
+
+// Upload de avatar para R2 (opcional, permanece disponível)
 router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
@@ -259,7 +247,6 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
 
     const originalExt = (path.extname(file.originalname) || "").toLowerCase();
     const ext = originalExt && originalExt.length <= 6 ? originalExt : ".png";
-
     const key = `avatars/${userId}/${Date.now()}${ext}`;
 
     await s3.send(
@@ -295,7 +282,7 @@ router.post("/me/avatar", authMiddleware, upload.single("avatar"), async (req, r
 
     return res.json({ ok: true, avatarUrl: publicUrl });
   } catch (error) {
-    console.error("[avatar upload R2]", error);
+    console.error("[avatar upload R2] Error:", error?.name || error?.code || error?.message, error);
     res.status(500).json({ error: "Erro ao salvar avatar." });
   }
 });
@@ -318,7 +305,7 @@ router.post("/change-password", authMiddleware, async (req, res) => {
   }
 });
 
-// Listagem (inclui cpf/telefone)
+// Listagem
 router.get("/", authMiddleware, async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -331,7 +318,7 @@ router.get("/", authMiddleware, async (_req, res) => {
   }
 });
 
-// Update por id (adm ou rotas internas)
+// Update por id
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
