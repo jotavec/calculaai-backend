@@ -42,6 +42,13 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 const app = express();
 
 /* ==================== CORS ====================== */
+/**
+ * Liberamos:
+ * - localhost (dev)
+ * - FRONTEND_ORIGIN/FRONTEND_URL do .env
+ * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
+ * - *.vercel.app (builds do Vercel)
+ */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
   'http://localhost:4173',
@@ -50,25 +57,45 @@ const STATIC_ALLOWED = [
 
 const ENV_ALLOWED = [
   process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_URL,
   process.env.FRONTEND_ORIGIN_2,
   process.env.FRONTEND_ORIGIN_3,
 ].filter(Boolean);
 
-const allowedList = new Set([...STATIC_ALLOWED, ...ENV_ALLOWED]);
+// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP.
+const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
+
+const allowedList = new Set([
+  ...STATIC_ALLOWED,
+  ...ENV_ALLOWED,
+  ALLOWED_IP,
+  `${ALLOWED_IP}:80`,
+]);
 
 const corsOptions = {
   origin: (origin, callback) => {
+    // Sem Origin (ex.: curl/Postman) -> permite
     if (!origin) return callback(null, true);
+
+    // Lista explícita
     if (allowedList.has(origin)) return callback(null, true);
+
+    // Builds Vercel (qualquer subdomínio)
     if (/^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)) {
       return callback(null, true);
     }
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
+
+    // Bloqueia demais
+    const err = new Error(`Not allowed by CORS: ${origin}`);
+    return callback(err);
   },
   credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
 };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 /* =============================================== */
 
 /**
