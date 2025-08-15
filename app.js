@@ -41,6 +41,9 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 
 const app = express();
 
+/* ============= Proxy awareness (Cloudflare/Nginx) ============= */
+app.set('trust proxy', 1); // necessário p/ req.secure e SameSite/Secure funcionarem atrás de proxy
+
 /* ==================== CORS ====================== */
 /**
  * Liberamos:
@@ -48,11 +51,13 @@ const app = express();
  * - FRONTEND_ORIGIN/FRONTEND_URL do .env
  * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
  * - *.vercel.app (builds do Vercel)
+ * - https://app.calculaaiabr.com (frontend em produção via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:60378',
+  'https://app.calculaaiabr.com',
 ];
 
 const ENV_ALLOWED = [
@@ -77,7 +82,7 @@ const corsOptions = {
     // Sem Origin (ex.: curl/Postman) -> permite
     if (!origin) return callback(null, true);
 
-    // Lista explícita
+    // Lista explícita (origens exatas)
     if (allowedList.has(origin)) return callback(null, true);
 
     // Builds Vercel (qualquer subdomínio)
@@ -92,6 +97,7 @@ const corsOptions = {
   credentials: true,
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
+  maxAge: 86400, // cache do preflight
 };
 
 app.use(cors(corsOptions));
