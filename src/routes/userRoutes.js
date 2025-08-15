@@ -30,6 +30,14 @@ const IS_PROD = NODE_ENV === "production";
 
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim(); // ex.: .calculaai.com.br
 
+// Overrides de cookie via .env (facilita rodar em HTTP por IP)
+const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();       // "true" | "false" | ""
+const COOKIE_SAMESITE_ENV = (process.env.COOKIE_SAMESITE || "").trim();   // "None" | "Lax" | "Strict" | ""
+
+function parseBool(v) {
+  return /^(1|true|yes|on)$/i.test(String(v || "").trim());
+}
+
 // R2 (Cloudflare) - opcional
 const R2_ENDPOINT = (process.env.R2_ENDPOINT || "").replace(/\/+$/, "");
 const R2_BUCKET = process.env.R2_BUCKET;
@@ -91,21 +99,30 @@ function keyFromPublicUrl(url) {
 }
 
 function isHttps(req) {
-  // precisa de app.set('trust proxy', 1) no app principal
+  // precisa ter app.set('trust proxy', 1) no app principal quando atrás de proxy
   return req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
 }
 
 function buildCookieOpts(req) {
-  // Em produção exigimos Secure/None + domain (se informado).
-  // Em desenvolvimento/teste (sem HTTPS) usamos Lax e sem domain para funcionar por IP.
-  const secure = IS_PROD ? true : isHttps(req);
-  const sameSite = secure ? "none" : "lax";
-  const domain = IS_PROD && COOKIE_DOMAIN ? COOKIE_DOMAIN : undefined;
+  // Se vier fixo no .env, usa; senão detecta HTTPS real da request
+  const forcedSecure =
+    COOKIE_SECURE_ENV !== "" ? parseBool(COOKIE_SECURE_ENV) : undefined;
+  const secure = typeof forcedSecure === "boolean" ? forcedSecure : isHttps(req);
+
+  // SameSite: do .env ou padrão (None quando secure, Lax quando não)
+  const sameSite = COOKIE_SAMESITE_ENV
+    ? COOKIE_SAMESITE_ENV
+    : secure
+    ? "none"
+    : "lax";
+
+  // Domain só quando tiver domínio próprio E conexão segura
+  const domain = secure && COOKIE_DOMAIN ? COOKIE_DOMAIN : undefined;
 
   return {
     httpOnly: true,
     secure,
-    sameSite,
+    sameSite, // "None" | "Lax" | "Strict"
     path: "/",
     maxAge: TOKEN_TTL_MS,
     ...(domain ? { domain } : {}),
@@ -113,7 +130,7 @@ function buildCookieOpts(req) {
 }
 
 // =============================================================================
-/** Middleware de Auth: cookie "token" OU Authorization: Bearer */
+// Middleware de Auth: cookie "token" OU Authorization: Bearer
 function authMiddleware(req, res, next) {
   let token = extractTokenFromAuthHeader(req);
   if (!token && req.cookies) token = req.cookies.token;
@@ -135,7 +152,8 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /^image\/(png|jpe?g|webp|gif|svg\+xml)$/.test(file.mimetype || "");
-    cb(ok ? null : new Error("INVALID_FILE_TYPE"), ok);
+    if (ok) return cb(null, true);
+    return cb(new Error("INVALID_FILE_TYPE"));
   },
 });
 
