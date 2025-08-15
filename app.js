@@ -9,12 +9,6 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
 
-// --- segurança extra ---
-const helmet = require('helmet');
-const hpp = require('hpp');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -47,28 +41,33 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 
 const app = express();
 
-/* ============= Proxy awareness (Cloudflare/Nginx) ============= */
-app.set('trust proxy', 1); // necessário p/ req.secure e SameSite/Secure funcionarem atrás de proxy
-app.disable('x-powered-by');
+/* =========================================================
+   Proxy awareness (Cloudflare/Nginx)
+   ========================================================= */
+app.set('trust proxy', 1);
 
-/* ==================== HARDENING ====================== */
-app.use(
-  helmet({
-    contentSecurityPolicy: false, // evita quebrar assets; podemos granular depois
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  })
-);
-app.use(hpp());
-app.use(compression());
+/* =========================================================
+   Security headers básicos (sem libs)
+   ========================================================= */
+app.use((req, res, next) => {
+  res.set('X-Frame-Options', 'DENY');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  // bloqueia features comuns por padrão
+  res.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
-/* ==================== CORS ====================== */
+/* =========================================================
+   CORS – lista de origens permitidas
+   ========================================================= */
 /**
  * Liberamos:
  * - localhost (dev)
- * - FRONTEND_ORIGIN/FRONTEND_URL do .env
- * - IP atual em HTTP (http://44.194.33.48)
+ * - FRONTEND_ORIGIN/FRONTEND_URL do .env (até 3 extras)
+ * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
  * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (produção via Cloudflare)
+ * - https://app.calculaaiabr.com (frontend prod)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
@@ -84,7 +83,7 @@ const ENV_ALLOWED = [
   process.env.FRONTEND_ORIGIN_3,
 ].filter(Boolean);
 
-// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP.
+// IP público atual (HTTP). Se mudar, ajuste aqui ou crie env ALLOWED_IP.
 const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
 
 const allowedList = new Set([
@@ -94,40 +93,59 @@ const allowedList = new Set([
   `${ALLOWED_IP}:80`,
 ]);
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Sem Origin (ex.: curl/Postman) -> permite
-    if (!origin) return callback(null, true);
+const isAllowedOrigin = (origin) =>
+  !origin || // requisições sem Origin (curl, Postman) — deixa passar
+  allowedList.has(origin) ||
+  /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
-    // Lista explícita
-    if (allowedList.has(origin)) return callback(null, true);
-
-    // Builds Vercel (qualquer subdomínio)
-    if (/^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)) {
-      return callback(null, true);
-    }
-
-    // Bloqueia demais
-    const err = new Error(`Not allowed by CORS: ${origin}`);
-    return callback(err);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400, // cache de preflight 24h
-};
-
-// Aplica CORS e, principalmente, **curto-circuita OPTIONS** antes de qualquer rota
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+/**
+ * Atalho de preflight (OPTIONS) que responde 204 rapidamente
+ * e NUNCA gera 500, mesmo que a origem não seja permitida.
+ */
 app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') return res.sendStatus(204); // garante que nunca cai nas rotas/middlewares
-  next();
+  if (req.method !== 'OPTIONS') return next();
+
+  const origin = req.header('Origin');
+  if (isAllowedOrigin(origin)) {
+    res.set('Access-Control-Allow-Origin', origin || '*');
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.set(
+      'Access-Control-Allow-Headers',
+      req.header('Access-Control-Request-Headers') || 'Content-Type, Authorization'
+    );
+    res.set('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  }
+
+  // origem não permitida: responde sem quebrar o servidor
+  return res.sendStatus(403);
 });
 
 /**
- * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
+ * CORS delegate: nunca lança erro. Para origem não permitida,
+ * define origin:false (sem headers CORS) — o navegador bloqueia no cliente,
+ * mas o servidor não retorna 500.
  */
+const corsDelegate = (req, cb) => {
+  const origin = req.header('Origin');
+  const opts = {
+    origin: isAllowedOrigin(origin),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400,
+  };
+  cb(null, opts);
+};
+
+app.use(cors(corsDelegate));
+app.options('*', cors(corsDelegate)); // redundante, mas ok
+
+/* =========================================================
+   Servir arquivos estáticos /uploads
+   ========================================================= */
 const uploadsPublic = path.join(__dirname, 'public', 'uploads');
 const uploadsLegacy = path.join(__dirname, 'uploads');
 
@@ -137,41 +155,26 @@ app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
 app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
 app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
 
-// Parsers
+/* =========================================================
+   Parsers
+   ========================================================= */
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 
-// Swagger (no-op)
+/* =========================================================
+   Swagger (no-op)
+   ========================================================= */
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
-app.get('/docs-json', (_req, res) => res.type('application/json').send(swaggerSpec));
+app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
 
-/* ==================== RATE LIMITS ====================== */
-// Limite global (ex.: 1000 req/15min por IP)
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(globalLimiter);
-
-// Limite mais agressivo em login
-const loginLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 20, // 20 tentativas em 10 min
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-/* =================== ROTAS PRINCIPAIS =================== */
+/* =========================================================
+   Rotas principais
+   ========================================================= */
 app.use('/api/despesasfixas', despesasFixasRoutes);
 app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
-
-// aplica rate limit só no grupo de usuários (inclui /login)
-app.use('/api/users', loginLimiter, userRoutes);
-
+app.use('/api/users', userRoutes);
 app.use('/api/encargos-sobre-venda', encargosSobreVendaRoutes);
 app.use('/api', filtroFaturamentoRoutes);
 app.use('/api/markup-ideal', markupIdealRoutes);
@@ -388,14 +391,12 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
   return res.json({ nome: '' });
 });
 
-/**
- * Health check
- */
+/* ===================== Health check ====================== */
 app.get('/health', (_req, res) => {
   res.send({ status: 'ok' });
 });
 
-// Middleware de erro sempre por último
+/* =================== Middleware de erro =================== */
 app.use(errorHandler);
 
 module.exports = app;
