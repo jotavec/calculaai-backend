@@ -21,7 +21,7 @@ const prisma = new PrismaClient();
 // =============================================================================
 // Configuração / Env
 // =============================================================================
-const SECRET = process.env.JWT_SECRET || "sua_chave_secreta";
+const SECRET = process.env.JWT_SECRET || "GUILHERME_JOAO_E_DORTA_REI_DA_BALA";
 const TOKEN_DIAS = Number(process.env.TOKEN_DIAS || 7);
 const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 
@@ -31,15 +31,21 @@ const IS_PROD = NODE_ENV === "production";
 // Defina no .env -> COOKIE_DOMAIN=.calculaaiabr.com para funcionar em app. e api.
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim();
 
-const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();
-const COOKIE_SAMESITE_ENV = (process.env.COOKIE_SAMESITE || "").trim();
+const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();   // "true" | "false" | ""
+const COOKIE_SAMESITE_ENV_RAW = (process.env.COOKIE_SAMESITE || "").trim(); // "None" | "Lax" | "Strict" | "none"...
 
 function parseBool(v) {
   return /^(1|true|yes|on)$/i.test(String(v || "").trim());
 }
 
+function normalizeSameSite(v) {
+  const s = String(v || "").toLowerCase().trim();
+  if (s === "lax" || s === "strict" || s === "none") return s;
+  return ""; // inválido -> forçaremos padrão abaixo
+}
+
 // =============================================================================
-// Configuração R2 (opcional)
+/** Configuração R2 (opcional) */
 // =============================================================================
 const R2_ENDPOINT = (process.env.R2_ENDPOINT || "").replace(/\/+$/, "");
 const R2_BUCKET = process.env.R2_BUCKET;
@@ -100,28 +106,26 @@ function keyFromPublicUrl(url) {
 }
 
 function isHttps(req) {
-  // ⚠️ IMPORTANTE: precisa ter app.set('trust proxy', 1) no app.js
+  // ⚠️ Requer app.set('trust proxy', 1) no app principal quando atrás de proxy
   return req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
 }
 
 function buildCookieOpts(req) {
-  const forcedSecure =
-    COOKIE_SECURE_ENV !== "" ? parseBool(COOKIE_SECURE_ENV) : undefined;
+  // Secure: usa override do .env se presente; senão detecta HTTPS real
+  const forcedSecure = COOKIE_SECURE_ENV !== "" ? parseBool(COOKIE_SECURE_ENV) : undefined;
   const secure = typeof forcedSecure === "boolean" ? forcedSecure : isHttps(req);
 
-  // SameSite: None quando secure para permitir cookies entre subdomínios
-  const sameSite = COOKIE_SAMESITE_ENV
-    ? COOKIE_SAMESITE_ENV
-    : secure
-    ? "none"
-    : "lax";
+  // SameSite normalizado: se não vier algo válido, usamos "none" quando secure e "lax" quando não
+  const samesiteEnv = normalizeSameSite(COOKIE_SAMESITE_ENV_RAW);
+  const sameSite = samesiteEnv || (secure ? "none" : "lax");
 
+  // Domain: só quando tiver domínio próprio E conexão segura (evita bloquear em http)
   const domain = secure && COOKIE_DOMAIN ? COOKIE_DOMAIN : undefined;
 
   return {
     httpOnly: true,
     secure,
-    sameSite,
+    sameSite, // "none" | "lax" | "strict"
     path: "/",
     maxAge: TOKEN_TTL_MS,
     ...(domain ? { domain } : {}),
@@ -146,7 +150,7 @@ function authMiddleware(req, res, next) {
 }
 
 // =============================================================================
-// Configuração de upload
+// Configuração de upload (avatar)
 // =============================================================================
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -167,9 +171,10 @@ const ALLOWED_PRESETS = new Set([
 // Rotas
 // =============================================================================
 
-// Health
+/** Health (debug rápido) */
 router.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+// -----------------------------------------------------------------------------
 // Cadastro
 router.post(
   "/",
@@ -199,6 +204,7 @@ router.post(
   })
 );
 
+// -----------------------------------------------------------------------------
 // Login
 router.post(
   "/login",
@@ -220,7 +226,8 @@ router.post(
   })
 );
 
-// Refresh
+// -----------------------------------------------------------------------------
+// Refresh de sessão (renova cookie com novo exp)
 router.post(
   "/refresh",
   authMiddleware,
@@ -231,7 +238,8 @@ router.post(
   })
 );
 
-// /me
+// -----------------------------------------------------------------------------
+// Dados do usuário logado
 router.get(
   "/me",
   authMiddleware,
@@ -245,7 +253,8 @@ router.get(
   })
 );
 
-// Atualizar perfil
+// -----------------------------------------------------------------------------
+// Atualizar perfil (parcial)
 router.put(
   "/me",
   authMiddleware,
@@ -269,7 +278,8 @@ router.put(
   })
 );
 
-// Avatar preset
+// -----------------------------------------------------------------------------
+// Avatar preset (sem upload)
 router.post(
   "/me/avatar-preset",
   authMiddleware,
@@ -287,11 +297,21 @@ router.post(
   })
 );
 
-// Upload avatar R2
+// -----------------------------------------------------------------------------
+// Upload de avatar ao R2 (opcional)
 router.post(
   "/me/avatar",
   authMiddleware,
-  upload.single("avatar"),
+  (req, res, next) =>
+    upload.single("avatar")(req, res, (err) => {
+      if (err) {
+        if (err.message === "INVALID_FILE_TYPE") {
+          return res.status(400).json({ ok: false, error: "Tipo de arquivo inválido." });
+        }
+        return next(err);
+      }
+      return next();
+    }),
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ ok: false, error: "Arquivo não enviado." });
     if (!s3) return res.status(501).json({ ok: false, error: "R2 não configurado no servidor." });
@@ -313,6 +333,7 @@ router.post(
       })
     );
 
+    // apaga o avatar anterior (se público no R2)
     const current = await prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },
@@ -337,6 +358,7 @@ router.post(
   })
 );
 
+// -----------------------------------------------------------------------------
 // Remover avatar
 router.delete(
   "/me/avatar",
@@ -363,7 +385,8 @@ router.delete(
   })
 );
 
-// Trocar senha
+// -----------------------------------------------------------------------------
+// Troca de senha
 router.post(
   "/change-password",
   authMiddleware,
@@ -380,7 +403,8 @@ router.post(
   })
 );
 
-// Listagem
+// -----------------------------------------------------------------------------
+// Listagem (admin simples – ajuste permissão conforme necessário)
 router.get(
   "/",
   authMiddleware,
@@ -392,7 +416,8 @@ router.get(
   })
 );
 
-// Update por id
+// -----------------------------------------------------------------------------
+// Update por id (admin simples)
 router.put(
   "/:id",
   authMiddleware,
@@ -417,6 +442,7 @@ router.put(
   })
 );
 
+// -----------------------------------------------------------------------------
 // Buscar por id
 router.get(
   "/:id",
@@ -432,6 +458,7 @@ router.get(
   })
 );
 
+// -----------------------------------------------------------------------------
 // Logout
 router.post(
   "/logout",
