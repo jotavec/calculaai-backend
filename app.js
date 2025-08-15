@@ -41,33 +41,17 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 
 const app = express();
 
-/* =========================================================
-   Proxy awareness (Cloudflare/Nginx)
-   ========================================================= */
-app.set('trust proxy', 1);
+/* ============= Proxy awareness (Cloudflare/Nginx) ============= */
+app.set('trust proxy', 1); // necessário p/ req.secure e cookies SameSite/Secure atrás de proxy
 
-/* =========================================================
-   Security headers básicos (sem libs)
-   ========================================================= */
-app.use((req, res, next) => {
-  res.set('X-Frame-Options', 'DENY');
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('Referrer-Policy', 'no-referrer');
-  // bloqueia features comuns por padrão
-  res.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-  next();
-});
-
-/* =========================================================
-   CORS – lista de origens permitidas
-   ========================================================= */
+/* ==================== CORS ====================== */
 /**
  * Liberamos:
  * - localhost (dev)
- * - FRONTEND_ORIGIN/FRONTEND_URL do .env (até 3 extras)
+ * - FRONTEND_ORIGIN/FRONTEND_URL do .env
  * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
  * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (frontend prod)
+ * - https://app.calculaaiabr.com (frontend em produção via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
@@ -83,69 +67,43 @@ const ENV_ALLOWED = [
   process.env.FRONTEND_ORIGIN_3,
 ].filter(Boolean);
 
-// IP público atual (HTTP). Se mudar, ajuste aqui ou crie env ALLOWED_IP.
+// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP.
 const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
 
-const allowedList = new Set([
-  ...STATIC_ALLOWED,
-  ...ENV_ALLOWED,
-  ALLOWED_IP,
-  `${ALLOWED_IP}:80`,
-]);
+// conjunto final
+const allowedSet = new Set([...STATIC_ALLOWED, ...ENV_ALLOWED, ALLOWED_IP, `${ALLOWED_IP}:80`]);
 
-const isAllowedOrigin = (origin) =>
-  !origin || // requisições sem Origin (curl, Postman) — deixa passar
-  allowedList.has(origin) ||
-  /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
+const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
 /**
- * Atalho de preflight (OPTIONS) que responde 204 rapidamente
- * e NUNCA gera 500, mesmo que a origem não seja permitida.
- */
-app.use((req, res, next) => {
-  if (req.method !== 'OPTIONS') return next();
-
-  const origin = req.header('Origin');
-  if (isAllowedOrigin(origin)) {
-    res.set('Access-Control-Allow-Origin', origin || '*');
-    res.set('Vary', 'Origin');
-    res.set('Access-Control-Allow-Credentials', 'true');
-    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.set(
-      'Access-Control-Allow-Headers',
-      req.header('Access-Control-Request-Headers') || 'Content-Type, Authorization'
-    );
-    res.set('Access-Control-Max-Age', '86400');
-    return res.sendStatus(204);
-  }
-
-  // origem não permitida: responde sem quebrar o servidor
-  return res.sendStatus(403);
-});
-
-/**
- * CORS delegate: nunca lança erro. Para origem não permitida,
- * define origin:false (sem headers CORS) — o navegador bloqueia no cliente,
- * mas o servidor não retorna 500.
+ * Delegate que NÃO lança erro quando a Origin não é permitida.
+ * Se não permitido -> origin:false (não habilita CORS na resposta), mas sem estourar 500.
  */
 const corsDelegate = (req, cb) => {
   const origin = req.header('Origin');
-  const opts = {
-    origin: isAllowedOrigin(origin),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    maxAge: 86400,
-  };
-  cb(null, opts);
+  const allow =
+    !origin || allowedSet.has(origin) || isVercel(origin);
+
+  const options = allow
+    ? {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        maxAge: 86400, // cache do preflight
+      }
+    : { origin: false }; // não habilita CORS, mas também não dá throw
+
+  cb(null, options);
 };
 
 app.use(cors(corsDelegate));
-app.options('*', cors(corsDelegate)); // redundante, mas ok
+app.options('*', cors(corsDelegate));
+/* =============================================== */
 
-/* =========================================================
-   Servir arquivos estáticos /uploads
-   ========================================================= */
+/**
+ * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
+ */
 const uploadsPublic = path.join(__dirname, 'public', 'uploads');
 const uploadsLegacy = path.join(__dirname, 'uploads');
 
@@ -153,25 +111,19 @@ app.use('/uploads', express.static(uploadsPublic, { maxAge: '1d', fallthrough: t
 app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
 
 app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
-app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
+app.use('/uploads/avatars',  express.static(path.join(uploadsLegacy, 'avatars'),  { maxAge: '1d' }));
 
-/* =========================================================
-   Parsers
-   ========================================================= */
+// Parsers
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 
-/* =========================================================
-   Swagger (no-op)
-   ========================================================= */
+// Swagger (no-op)
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
 app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
 
-/* =========================================================
-   Rotas principais
-   ========================================================= */
+/* =================== ROTAS PRINCIPAIS =================== */
 app.use('/api/despesasfixas', despesasFixasRoutes);
 app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
 app.use('/api/users', userRoutes);
@@ -391,12 +343,14 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
   return res.json({ nome: '' });
 });
 
-/* ===================== Health check ====================== */
+/**
+ * Health check
+ */
 app.get('/health', (_req, res) => {
   res.send({ status: 'ok' });
 });
 
-/* =================== Middleware de erro =================== */
+// Middleware de erro sempre por último
 app.use(errorHandler);
 
 module.exports = app;
