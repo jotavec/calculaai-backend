@@ -28,27 +28,25 @@ const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
 
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim(); // ex.: .calculaai.com.br
+// Defina no .env -> COOKIE_DOMAIN=.calculaaiabr.com para funcionar em app. e api.
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim();
 
-// Overrides de cookie via .env (facilita rodar em HTTP por IP)
-const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();       // "true" | "false" | ""
-const COOKIE_SAMESITE_ENV = (process.env.COOKIE_SAMESITE || "").trim();   // "None" | "Lax" | "Strict" | ""
+const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();
+const COOKIE_SAMESITE_ENV = (process.env.COOKIE_SAMESITE || "").trim();
 
 function parseBool(v) {
   return /^(1|true|yes|on)$/i.test(String(v || "").trim());
 }
 
-// R2 (Cloudflare) - opcional
+// =============================================================================
+// Configuração R2 (opcional)
+// =============================================================================
 const R2_ENDPOINT = (process.env.R2_ENDPOINT || "").replace(/\/+$/, "");
 const R2_BUCKET = process.env.R2_BUCKET;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-// Ex.: https://pub-xxxx.r2.dev/seu-bucket
 const R2_PUBLIC_URL_PREFIX = (process.env.R2_PUBLIC_URL_PREFIX || "").replace(/\/+$/, "");
 
-// =============================================================================
-// Utilidades
-// =============================================================================
 const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 50,
@@ -69,6 +67,9 @@ const s3 =
       })
     : null;
 
+// =============================================================================
+// Funções utilitárias
+// =============================================================================
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -99,30 +100,28 @@ function keyFromPublicUrl(url) {
 }
 
 function isHttps(req) {
-  // precisa ter app.set('trust proxy', 1) no app principal quando atrás de proxy
+  // ⚠️ IMPORTANTE: precisa ter app.set('trust proxy', 1) no app.js
   return req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
 }
 
 function buildCookieOpts(req) {
-  // Se vier fixo no .env, usa; senão detecta HTTPS real da request
   const forcedSecure =
     COOKIE_SECURE_ENV !== "" ? parseBool(COOKIE_SECURE_ENV) : undefined;
   const secure = typeof forcedSecure === "boolean" ? forcedSecure : isHttps(req);
 
-  // SameSite: do .env ou padrão (None quando secure, Lax quando não)
+  // SameSite: None quando secure para permitir cookies entre subdomínios
   const sameSite = COOKIE_SAMESITE_ENV
     ? COOKIE_SAMESITE_ENV
     : secure
     ? "none"
     : "lax";
 
-  // Domain só quando tiver domínio próprio E conexão segura
   const domain = secure && COOKIE_DOMAIN ? COOKIE_DOMAIN : undefined;
 
   return {
     httpOnly: true,
     secure,
-    sameSite, // "None" | "Lax" | "Strict"
+    sameSite,
     path: "/",
     maxAge: TOKEN_TTL_MS,
     ...(domain ? { domain } : {}),
@@ -130,7 +129,8 @@ function buildCookieOpts(req) {
 }
 
 // =============================================================================
-// Middleware de Auth: cookie "token" OU Authorization: Bearer
+// Middleware de autenticação
+// =============================================================================
 function authMiddleware(req, res, next) {
   let token = extractTokenFromAuthHeader(req);
   if (!token && req.cookies) token = req.cookies.token;
@@ -146,7 +146,8 @@ function authMiddleware(req, res, next) {
 }
 
 // =============================================================================
-// Multer (imagens)
+// Configuração de upload
+// =============================================================================
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -157,29 +158,18 @@ const upload = multer({
   },
 });
 
-// Avatar pré-definido
 const ALLOWED_PRESETS = new Set([
-  "confeiteiro",
-  "mecanico",
-  "medico",
-  "engenheiro",
-  "chef",
-  "atendente",
-  "padeiro",
-  "default",
+  "confeiteiro", "mecanico", "medico", "engenheiro",
+  "chef", "atendente", "padeiro", "default",
 ]);
 
 // =============================================================================
 // Rotas
 // =============================================================================
 
-/** Health (útil p/ monitor e para proxy de saúde) */
+// Health
 router.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-/** Debug simples */
-router.get("/debug-existe", (_req, res) => res.json({ ok: true }));
-
-// -----------------------------------------------------------------------------
 // Cadastro
 router.post(
   "/",
@@ -209,7 +199,6 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
 // Login
 router.post(
   "/login",
@@ -231,8 +220,7 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Refresh de sessão (renova cookie sem alterar claims)
+// Refresh
 router.post(
   "/refresh",
   authMiddleware,
@@ -243,8 +231,7 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Dados do usuário logado
+// /me
 router.get(
   "/me",
   authMiddleware,
@@ -258,8 +245,7 @@ router.get(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Atualizar perfil (parcial)
+// Atualizar perfil
 router.put(
   "/me",
   authMiddleware,
@@ -283,8 +269,7 @@ router.put(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Avatar preset (sem upload)
+// Avatar preset
 router.post(
   "/me/avatar-preset",
   authMiddleware,
@@ -302,8 +287,7 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Upload de avatar ao R2 (opcional)
+// Upload avatar R2
 router.post(
   "/me/avatar",
   authMiddleware,
@@ -329,7 +313,6 @@ router.post(
       })
     );
 
-    // apaga o avatar anterior (se público no R2)
     const current = await prisma.user.findUnique({
       where: { id: userId },
       select: { avatarUrl: true },
@@ -354,8 +337,7 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Remover avatar (apaga no R2 se for URL pública; limpa campo)
+// Remover avatar
 router.delete(
   "/me/avatar",
   authMiddleware,
@@ -381,8 +363,7 @@ router.delete(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Troca de senha
+// Trocar senha
 router.post(
   "/change-password",
   authMiddleware,
@@ -399,8 +380,7 @@ router.post(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Listagem (admin simples – ajuste permissão conforme necessário)
+// Listagem
 router.get(
   "/",
   authMiddleware,
@@ -412,8 +392,7 @@ router.get(
   })
 );
 
-// -----------------------------------------------------------------------------
-// Update por id (admin simples)
+// Update por id
 router.put(
   "/:id",
   authMiddleware,
@@ -438,7 +417,6 @@ router.put(
   })
 );
 
-// -----------------------------------------------------------------------------
 // Buscar por id
 router.get(
   "/:id",
@@ -454,7 +432,6 @@ router.get(
   })
 );
 
-// -----------------------------------------------------------------------------
 // Logout
 router.post(
   "/logout",
