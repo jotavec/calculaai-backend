@@ -9,6 +9,12 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
 
+// --- segurança extra ---
+const helmet = require('helmet');
+const hpp = require('hpp');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -43,15 +49,26 @@ const app = express();
 
 /* ============= Proxy awareness (Cloudflare/Nginx) ============= */
 app.set('trust proxy', 1); // necessário p/ req.secure e SameSite/Secure funcionarem atrás de proxy
+app.disable('x-powered-by');
+
+/* ==================== HARDENING ====================== */
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // evita quebrar assets; podemos granular depois
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+app.use(hpp());
+app.use(compression());
 
 /* ==================== CORS ====================== */
 /**
  * Liberamos:
  * - localhost (dev)
  * - FRONTEND_ORIGIN/FRONTEND_URL do .env
- * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
+ * - IP atual em HTTP (http://44.194.33.48)
  * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (frontend em produção via Cloudflare)
+ * - https://app.calculaaiabr.com (produção via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
@@ -82,7 +99,7 @@ const corsOptions = {
     // Sem Origin (ex.: curl/Postman) -> permite
     if (!origin) return callback(null, true);
 
-    // Lista explícita (origens exatas)
+    // Lista explícita
     if (allowedList.has(origin)) return callback(null, true);
 
     // Builds Vercel (qualquer subdomínio)
@@ -95,14 +112,18 @@ const corsOptions = {
     return callback(err);
   },
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  maxAge: 86400, // cache do preflight
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400, // cache de preflight 24h
 };
 
+// Aplica CORS e, principalmente, **curto-circuita OPTIONS** antes de qualquer rota
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-/* =============================================== */
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return res.sendStatus(204); // garante que nunca cai nas rotas/middlewares
+  next();
+});
 
 /**
  * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
@@ -114,7 +135,7 @@ app.use('/uploads', express.static(uploadsPublic, { maxAge: '1d', fallthrough: t
 app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
 
 app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
-app.use('/uploads/avatars',  express.static(path.join(uploadsLegacy, 'avatars'),  { maxAge: '1d' }));
+app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
 
 // Parsers
 app.use(express.json({ limit: '20mb' }));
@@ -124,12 +145,33 @@ app.use(cookieParser());
 // Swagger (no-op)
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
-app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
+app.get('/docs-json', (_req, res) => res.type('application/json').send(swaggerSpec));
+
+/* ==================== RATE LIMITS ====================== */
+// Limite global (ex.: 1000 req/15min por IP)
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
+// Limite mais agressivo em login
+const loginLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20, // 20 tentativas em 10 min
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /* =================== ROTAS PRINCIPAIS =================== */
 app.use('/api/despesasfixas', despesasFixasRoutes);
 app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
-app.use('/api/users', userRoutes);
+
+// aplica rate limit só no grupo de usuários (inclui /login)
+app.use('/api/users', loginLimiter, userRoutes);
+
 app.use('/api/encargos-sobre-venda', encargosSobreVendaRoutes);
 app.use('/api', filtroFaturamentoRoutes);
 app.use('/api/markup-ideal', markupIdealRoutes);
