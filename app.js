@@ -1,9 +1,10 @@
 'use strict';
 
 /* ===================== ENV ===================== */
-// Carrega .env localmente APENAS se DATABASE_URL não existir (em prod o host injeta)
+// Em produção (Render), as envs já vêm do painel.
+// Em dev/local, carrega .env se a DATABASE_URL não existir.
 if (!process.env.DATABASE_URL) {
-  require('dotenv').config();
+  try { require('dotenv').config(); } catch (_) {}
 }
 
 /* =================== IMPORTS =================== */
@@ -17,8 +18,8 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const app = express();
 
-/* ============= Proxy awareness (Cloudflare/Nginx) ============= */
-// Necessário para cookies Secure/SameSite atrás de proxy e para req.secure funcionar
+/* ============= Proxy awareness (Cloudflare/NGINX) ============= */
+// Necessário para cookies Secure/SameSite atrás de proxy e para req.secure funcionar.
 app.set('trust proxy', 1);
 
 /* ==================== CORS ====================== */
@@ -26,49 +27,33 @@ app.set('trust proxy', 1);
  * Permitidos:
  * - https://app.calculaaibr.com (frontend produção)
  * - *.vercel.app (previews da Vercel)
- * - FRONTEND_ORIGIN/FRONTEND_URL das envs (fallback)
+ * - FRONTEND_* via env (fallback)
  */
 const normalize = (u) => (typeof u === 'string' ? u.replace(/\/+$/, '') : u);
+const baseAllow = [
+  'https://app.calculaaibr.com',
+  process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN_2,
+  process.env.FRONTEND_ORIGIN_3,
+].filter(Boolean).map(normalize);
+const allowlist = new Set(baseAllow);
+const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin || '');
 
-const allowlist = new Set(
-  [
-    'https://app.calculaaibr.com',
-    process.env.FRONTEND_ORIGIN,
-    process.env.FRONTEND_URL,
-    process.env.FRONTEND_ORIGIN_2,
-    process.env.FRONTEND_ORIGIN_3,
-  ]
-    .filter(Boolean)
-    .map(normalize)
-);
-
-const isVercel = (origin) =>
-  /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin || '');
-
-// Ajuda caches a respeitarem a variação por Origem
-app.use((req, res, next) => {
-  res.setHeader('Vary', 'Origin');
-  next();
-});
+app.use((req, res, next) => { res.setHeader('Vary', 'Origin'); next(); });
 
 const corsDelegate = (req, cb) => {
   const origin = normalize(req.header('Origin') || '');
-  const allowed =
-    !origin || allowlist.has(origin) || isVercel(origin);
+  const allowed = !origin || allowlist.has(origin) || isVercel(origin);
 
-  cb(
-    null,
-    allowed
-      ? {
-          origin: true, // ecoa a Origin recebida
-          credentials: true,
-          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-          optionsSuccessStatus: 204,
-          maxAge: 86400,
-        }
-      : { origin: false, optionsSuccessStatus: 204 }
-  );
+  cb(null, allowed ? {
+    origin: true,                 // ecoa a Origin recebida
+    credentials: true,
+    methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+    allowedHeaders: ['Content-Type','Authorization','X-Requested-With'],
+    optionsSuccessStatus: 204,
+    maxAge: 86400,
+  } : { origin: false, optionsSuccessStatus: 204 });
 };
 
 app.use(cors(corsDelegate));
@@ -89,16 +74,16 @@ app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas')
 app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
 
 /* ================== SWAGGER (no-op) ================== */
-// Mantido “no-op” para não quebrar deploy; troque quando quiser habilitar real.
+// Mantido “no-op” para não quebrar deploy; habilite quando quiser.
 const swaggerUi = { serve: (req, res, next) => next(), setup: () => (req, res, next) => next() };
 const swaggerSpec = { openapi: '3.0.0', info: { title: 'API', version: '1.0.0' } };
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
-app.get('/docs-json', (_req, res) => res.type('application/json').send(swaggerSpec));
+app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
 
 /* ===================== MIDDLEWARES ===================== */
 const errorHandler = require('./src/middleware/errorHandler');
-const auth = require('./src/middleware/auth');
+const auth         = require('./src/middleware/auth');
 
 /* ======================== ROTAS ======================== */
 const despesasFixasRoutes          = require('./src/routes/despesasFixas');
@@ -120,23 +105,23 @@ const mercadopagoRoutes            = require('./src/routes/mercadopagoRoutes');
 const sugestoesRoutes              = require('./src/routes/sugestoes');
 
 /* =================== MOUNT =================== */
-app.use('/api/despesasfixas', despesasFixasRoutes);
-app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/encargos-sobre-venda', encargosSobreVendaRoutes);
-app.use('/api', filtroFaturamentoRoutes);
-app.use('/api/markup-ideal', markupIdealRoutes);
-app.use('/api/bloco-ativos', blocoAtivosRoutes);
-app.use('/api/produtos', produtosRoutes);
-app.use('/api/preferencias', preferenciasRoutes);
-app.use('/api/fornecedores', fornecedorRoutes(prisma));
-app.use('/api/movimentacoes', movimentacoesRoutes);
-app.use('/api/receitas', receitasRoutes);
-app.use('/api/rotulo-nutricional', rotuloNutricionalRoutes);
-app.use('/api/categorias-nutricionais', categoriasNutricionaisRouter);
-app.use('/api/uploads', uploadsReceitaRoutes);
-app.use('/api/mercadopago', mercadopagoRoutes);
-app.use('/api/sugestoes', sugestoesRoutes);
+app.use('/api/despesasfixas',                despesasFixasRoutes);
+app.use('/api/folhapagamento/funcionarios',  folhaDePagamentoRoutes);
+app.use('/api/users',                        userRoutes);
+app.use('/api/encargos-sobre-venda',         encargosSobreVendaRoutes);
+app.use('/api',                              filtroFaturamentoRoutes);
+app.use('/api/markup-ideal',                 markupIdealRoutes);
+app.use('/api/bloco-ativos',                 blocoAtivosRoutes);
+app.use('/api/produtos',                     produtosRoutes);
+app.use('/api/preferencias',                 preferenciasRoutes);
+app.use('/api/fornecedores',                 fornecedorRoutes(prisma));
+app.use('/api/movimentacoes',                movimentacoesRoutes);
+app.use('/api/receitas',                     receitasRoutes);
+app.use('/api/rotulo-nutricional',           rotuloNutricionalRoutes);
+app.use('/api/categorias-nutricionais',      categoriasNutricionaisRouter);
+app.use('/api/uploads',                      uploadsReceitaRoutes);
+app.use('/api/mercadopago',                  mercadopagoRoutes);
+app.use('/api/sugestoes',                    sugestoesRoutes);
 
 /* ========================= MARCAS ========================= */
 app.get('/api/marcas', auth, async (req, res) => {
@@ -321,7 +306,7 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
         '';
       if (nome) return res.json({ nome });
     }
-  } catch (e) {}
+  } catch (_) {}
 
   try {
     const upcRes = await axios.get(
@@ -333,7 +318,7 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
       const nome = item.title || item.description || '';
       if (nome) return res.json({ nome });
     }
-  } catch (e) {}
+  } catch (_) {}
 
   return res.json({ nome: '' });
 });
@@ -343,19 +328,14 @@ app.get('/health', (_req, res) => {
   res.send({ status: 'ok' });
 });
 
+/* ============== FALLBACK 404 (Express 5 safe) ============== */
+// Nada de app.get('*') no Express 5.
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 /* ================ ERROR HANDLER ================ */
-app.use(require('./src/middleware/errorHandler') || errorHandler);
+app.use(errorHandler);
 
 /* ============ EXPORTA O APP ============ */
-/**
- * Se você usa um arquivo separado que dá `app.listen(...)`,
- * mantenha o `module.exports = app;`.
- * Se preferir subir direto aqui, descomente o listen abaixo.
- */
 module.exports = app;
-
-// // Descomente se quiser ouvir aqui mesmo:
-// const PORT = process.env.PORT || 3000;
-// app.listen(PORT, () => {
-//   console.log(`API rodando na porta ${PORT}`);
-// });
