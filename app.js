@@ -1,5 +1,10 @@
-// Carrega .env SEMPRE; variáveis já definidas no ambiente NÃO são sobrescritas
-require('dotenv').config();
+// app.js
+'use strict';
+
+// Carrega .env localmente se a DATABASE_URL não existir no ambiente
+if (!process.env.DATABASE_URL) {
+  require('dotenv').config();
+}
 
 const express = require('express');
 const path = require('path');
@@ -40,22 +45,23 @@ const sugestoesRoutes = require('./src/routes/sugestoes');
 const app = express();
 
 /* ============= Proxy awareness (Cloudflare/Nginx) ============= */
-app.set('trust proxy', 1); // necessário p/ req.secure e cookies SameSite/Secure atrás de proxy
+// Necessário para cookies Secure/SameSite atrás de proxy e para req.secure funcionar
+app.set('trust proxy', 1);
 
 /* ==================== CORS ====================== */
 /**
  * Liberamos:
  * - localhost (dev)
- * - FRONTEND_ORIGIN/FRONTEND_URL do .env
- * - IP atual (HTTP) se quiser testar por IP (ALLOWED_IP)
+ * - FRONTEND_ORIGIN / FRONTEND_URL / FRONTEND_ORIGIN_2 / FRONTEND_ORIGIN_3 do .env
+ * - IP atual em HTTP (http://44.194.33.48) — ajuste se o IP trocar
  * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaibr.com (frontend em produção via Cloudflare)
+ * - https://app.calculaaiabr.com (frontend prod via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:60378',
-  'https://app.calculaaibr.com', // <<< domínio correto do app em produção
+  'https://app.calculaaiabr.com',
 ];
 
 const ENV_ALLOWED = [
@@ -65,35 +71,46 @@ const ENV_ALLOWED = [
   process.env.FRONTEND_ORIGIN_3,
 ].filter(Boolean);
 
-// IP público atual (HTTP). Ajuste/defina via ALLOWED_IP se precisar.
-const ALLOWED_IP = process.env.ALLOWED_IP; // ex: 'http://44.194.33.48'
+// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP
+const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
 
-// conjunto final
-const allowedSet = new Set([
-  ...STATIC_ALLOWED,
-  ...ENV_ALLOWED,
-  ...(ALLOWED_IP ? [ALLOWED_IP, `${ALLOWED_IP}:80`] : []),
-]);
+// Conjunto final (normalizado sem barra final)
+const normalize = (u) => (typeof u === 'string' ? u.replace(/\/+$/, '') : u);
+const allowedSet = new Set(
+  [...STATIC_ALLOWED, ...ENV_ALLOWED, ALLOWED_IP, `${ALLOWED_IP}:80`]
+    .filter(Boolean)
+    .map(normalize)
+);
 
 const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
+// Garante que caches respeitem o CORS por origem
+app.use((req, res, next) => {
+  res.setHeader('Vary', 'Origin');
+  next();
+});
+
 /**
  * Delegate que NÃO lança erro quando a Origin não é permitida.
- * Se não permitido -> origin:false (não habilita CORS na resposta), mas sem estourar 500.
+ * Se não permitido -> origin:false (não habilita CORS), mas sem estourar 500.
  */
 const corsDelegate = (req, cb) => {
   const origin = req.header('Origin');
-  const allow = !origin || allowedSet.has(origin) || isVercel(origin);
+  const o = origin ? normalize(origin) : '';
+
+  const allow =
+    !o || allowedSet.has(o) || isVercel(o);
 
   const options = allow
     ? {
-        origin: true,
+        origin: true, // ecoa a Origin do pedido
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
         maxAge: 86400, // cache do preflight
+        optionsSuccessStatus: 204,
       }
-    : { origin: false };
+    : { origin: false, optionsSuccessStatus: 204 };
 
   cb(null, options);
 };
