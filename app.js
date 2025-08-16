@@ -1,7 +1,5 @@
-// Carrega .env localmente se a DATABASE_URL não existir no ambiente
-if (!process.env.DATABASE_URL) {
-  require('dotenv').config();
-}
+// Carrega .env SEMPRE; variáveis já definidas no ambiente NÃO são sobrescritas
+require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
@@ -49,15 +47,15 @@ app.set('trust proxy', 1); // necessário p/ req.secure e cookies SameSite/Secur
  * Liberamos:
  * - localhost (dev)
  * - FRONTEND_ORIGIN/FRONTEND_URL do .env
- * - IP atual em HTTP (http://44.194.33.48) — ajuste aqui se trocar
+ * - IP atual (HTTP) se quiser testar por IP (ALLOWED_IP)
  * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (frontend em produção via Cloudflare)
+ * - https://app.calculaaibr.com (frontend em produção via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:60378',
-  'https://app.calculaaiabr.com',
+  'https://app.calculaaibr.com', // <<< domínio correto do app em produção
 ];
 
 const ENV_ALLOWED = [
@@ -67,11 +65,15 @@ const ENV_ALLOWED = [
   process.env.FRONTEND_ORIGIN_3,
 ].filter(Boolean);
 
-// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP.
-const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
+// IP público atual (HTTP). Ajuste/defina via ALLOWED_IP se precisar.
+const ALLOWED_IP = process.env.ALLOWED_IP; // ex: 'http://44.194.33.48'
 
 // conjunto final
-const allowedSet = new Set([...STATIC_ALLOWED, ...ENV_ALLOWED, ALLOWED_IP, `${ALLOWED_IP}:80`]);
+const allowedSet = new Set([
+  ...STATIC_ALLOWED,
+  ...ENV_ALLOWED,
+  ...(ALLOWED_IP ? [ALLOWED_IP, `${ALLOWED_IP}:80`] : []),
+]);
 
 const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
@@ -81,8 +83,7 @@ const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(ori
  */
 const corsDelegate = (req, cb) => {
   const origin = req.header('Origin');
-  const allow =
-    !origin || allowedSet.has(origin) || isVercel(origin);
+  const allow = !origin || allowedSet.has(origin) || isVercel(origin);
 
   const options = allow
     ? {
@@ -92,7 +93,7 @@ const corsDelegate = (req, cb) => {
         allowedHeaders: ['Content-Type', 'Authorization'],
         maxAge: 86400, // cache do preflight
       }
-    : { origin: false }; // não habilita CORS, mas também não dá throw
+    : { origin: false };
 
   cb(null, options);
 };
