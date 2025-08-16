@@ -1,46 +1,20 @@
 'use strict';
 
-// Carrega .env localmente **apenas** se a DATABASE_URL não existir no ambiente (PM2/produção já injeta isso)
+/* ===================== ENV ===================== */
+// Carrega .env localmente APENAS se DATABASE_URL não existir (em prod o host injeta)
 if (!process.env.DATABASE_URL) {
   require('dotenv').config();
 }
 
+/* =================== IMPORTS =================== */
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
-
 const { PrismaClient } = require('@prisma/client');
+
 const prisma = new PrismaClient();
-
-// Swagger OFF temporário para isolar erro de deploy
-const swaggerUi = { serve: (req, res, next) => next(), setup: () => (req, res, next) => next() };
-const swaggerSpec = { openapi: '3.0.0', info: { title: 'API', version: '1.0.0' } };
-
-// Middlewares próprios
-const errorHandler = require('./src/middleware/errorHandler');
-const auth = require('./src/middleware/auth');
-
-// Rotas
-const despesasFixasRoutes = require('./src/routes/despesasFixas');
-const folhaDePagamentoRoutes = require('./src/routes/folhaDePagamento');
-const userRoutes = require('./src/routes/userRoutes.js');
-const encargosSobreVendaRoutes = require('./src/routes/encargosSobreVenda');
-const filtroFaturamentoRoutes = require('./src/routes/filtroFaturamento');
-const markupIdealRoutes = require('./src/routes/markupIdeal');
-const blocoAtivosRoutes = require('./src/routes/blocoAtivos');
-const produtosRoutes = require('./src/routes/produtos');
-const preferenciasRoutes = require('./src/routes/preferenciasRoutes');
-const fornecedorRoutes = require('./src/routes/fornecedores');
-const movimentacoesRoutes = require('./src/routes/movimentacoes');
-const receitasRoutes = require('./src/routes/receitas');
-const uploadsReceitaRoutes = require('./src/routes/uploadsReceita');
-const rotuloNutricionalRoutes = require('./src/routes/rotuloNutricional');
-const categoriasNutricionaisRouter = require('./src/routes/categoriasNutricionais');
-const mercadopagoRoutes = require('./src/routes/mercadopagoRoutes');
-const sugestoesRoutes = require('./src/routes/sugestoes');
-
 const app = express();
 
 /* ============= Proxy awareness (Cloudflare/Nginx) ============= */
@@ -50,98 +24,102 @@ app.set('trust proxy', 1);
 /* ==================== CORS ====================== */
 /**
  * Permitidos:
- * - localhost (dev)
- * - FRONTEND_ORIGIN / FRONTEND_URL / FRONTEND_ORIGIN_2 / FRONTEND_ORIGIN_3 do .env
- * - IP atual em HTTP (http://44.194.33.48) — ajuste se o IP trocar
- * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (frontend prod via Cloudflare)
+ * - https://app.calculaaibr.com (frontend produção)
+ * - *.vercel.app (previews da Vercel)
+ * - FRONTEND_ORIGIN/FRONTEND_URL das envs (fallback)
  */
-const STATIC_ALLOWED = [
-  'http://localhost:5173',
-  'http://localhost:4173',
-  'http://localhost:60378',
-  'https://app.calculaaiabr.com',
-];
-
-const ENV_ALLOWED = [
-  process.env.FRONTEND_ORIGIN,
-  process.env.FRONTEND_URL,
-  process.env.FRONTEND_ORIGIN_2,
-  process.env.FRONTEND_ORIGIN_3,
-].filter(Boolean);
-
-// IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP
-const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
-
-// Normaliza removendo barra final
 const normalize = (u) => (typeof u === 'string' ? u.replace(/\/+$/, '') : u);
 
-// Conjunto final
-const allowedSet = new Set(
-  [...STATIC_ALLOWED, ...ENV_ALLOWED, ALLOWED_IP, `${ALLOWED_IP}:80`]
+const allowlist = new Set(
+  [
+    'https://app.calculaaibr.com',
+    process.env.FRONTEND_ORIGIN,
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ORIGIN_2,
+    process.env.FRONTEND_ORIGIN_3,
+  ]
     .filter(Boolean)
     .map(normalize)
 );
 
-const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
+const isVercel = (origin) =>
+  /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin || '');
 
-// Ajuda o cache a respeitar CORS por origem
+// Ajuda caches a respeitarem a variação por Origem
 app.use((req, res, next) => {
   res.setHeader('Vary', 'Origin');
   next();
 });
 
-/**
- * Delegate que NÃO lança erro quando a Origin não é permitida.
- * Se não permitido -> origin:false (não habilita CORS), mas sem 500.
- */
 const corsDelegate = (req, cb) => {
-  const origin = req.header('Origin');
-  const o = origin ? normalize(origin) : '';
+  const origin = normalize(req.header('Origin') || '');
+  const allowed =
+    !origin || allowlist.has(origin) || isVercel(origin);
 
-  const allow = !o || allowedSet.has(o) || isVercel(o);
-
-  const options = allow
-    ? {
-        origin: true, // ecoa a Origin do pedido
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-        maxAge: 86400, // cache do preflight
-        optionsSuccessStatus: 204,
-      }
-    : { origin: false, optionsSuccessStatus: 204 };
-
-  cb(null, options);
+  cb(
+    null,
+    allowed
+      ? {
+          origin: true, // ecoa a Origin recebida
+          credentials: true,
+          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+          optionsSuccessStatus: 204,
+          maxAge: 86400,
+        }
+      : { origin: false, optionsSuccessStatus: 204 }
+  );
 };
 
 app.use(cors(corsDelegate));
 app.options('*', cors(corsDelegate));
-/* =============================================== */
 
-/**
- * --------- SERVIR ARQUIVOS ESTÁTICOS /uploads ----------
- */
+/* ============== PARSERS & COOKIES ============== */
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(cookieParser());
+
+/* ======== ARQUIVOS ESTÁTICOS /uploads ========= */
 const uploadsPublic = path.join(__dirname, 'public', 'uploads');
 const uploadsLegacy = path.join(__dirname, 'uploads');
 
 app.use('/uploads', express.static(uploadsPublic, { maxAge: '1d', fallthrough: true }));
 app.use('/uploads', express.static(uploadsLegacy, { maxAge: '1d' }));
-
 app.use('/uploads/receitas', express.static(path.join(uploadsPublic, 'receitas'), { maxAge: '1d' }));
-app.use('/uploads/avatars',  express.static(path.join(uploadsLegacy, 'avatars'),  { maxAge: '1d' }));
+app.use('/uploads/avatars', express.static(path.join(uploadsLegacy, 'avatars'), { maxAge: '1d' }));
 
-// Parsers
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-app.use(cookieParser());
-
-// Swagger (no-op)
+/* ================== SWAGGER (no-op) ================== */
+// Mantido “no-op” para não quebrar deploy; troque quando quiser habilitar real.
+const swaggerUi = { serve: (req, res, next) => next(), setup: () => (req, res, next) => next() };
+const swaggerSpec = { openapi: '3.0.0', info: { title: 'API', version: '1.0.0' } };
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/openapi.json', (_req, res) => res.type('application/json').send(swaggerSpec));
-app.get('/docs-json',   (_req, res) => res.type('application/json').send(swaggerSpec));
+app.get('/docs-json', (_req, res) => res.type('application/json').send(swaggerSpec));
 
-/* =================== ROTAS PRINCIPAIS =================== */
+/* ===================== MIDDLEWARES ===================== */
+const errorHandler = require('./src/middleware/errorHandler');
+const auth = require('./src/middleware/auth');
+
+/* ======================== ROTAS ======================== */
+const despesasFixasRoutes          = require('./src/routes/despesasFixas');
+const folhaDePagamentoRoutes       = require('./src/routes/folhaDePagamento');
+const userRoutes                   = require('./src/routes/userRoutes.js');
+const encargosSobreVendaRoutes     = require('./src/routes/encargosSobreVenda');
+const filtroFaturamentoRoutes      = require('./src/routes/filtroFaturamento');
+const markupIdealRoutes            = require('./src/routes/markupIdeal');
+const blocoAtivosRoutes            = require('./src/routes/blocoAtivos');
+const produtosRoutes               = require('./src/routes/produtos');
+const preferenciasRoutes           = require('./src/routes/preferenciasRoutes');
+const fornecedorRoutes             = require('./src/routes/fornecedores');
+const movimentacoesRoutes          = require('./src/routes/movimentacoes');
+const receitasRoutes               = require('./src/routes/receitas');
+const uploadsReceitaRoutes         = require('./src/routes/uploadsReceita');
+const rotuloNutricionalRoutes      = require('./src/routes/rotuloNutricional');
+const categoriasNutricionaisRouter = require('./src/routes/categoriasNutricionais');
+const mercadopagoRoutes            = require('./src/routes/mercadopagoRoutes');
+const sugestoesRoutes              = require('./src/routes/sugestoes');
+
+/* =================== MOUNT =================== */
 app.use('/api/despesasfixas', despesasFixasRoutes);
 app.use('/api/folhapagamento/funcionarios', folhaDePagamentoRoutes);
 app.use('/api/users', userRoutes);
@@ -273,7 +251,6 @@ app.delete('/api/categorias/:id', auth, async (req, res) => {
     const cat = await prisma.categoria.findUnique({ where: { id } });
     if (!cat) return res.status(404).json({ error: 'Categoria não encontrada' });
     if (cat.userId !== userId) return res.status(403).json({ error: 'Acesso negado' });
-
     await prisma.categoria.delete({ where: { id } });
     res.status(204).send();
   } catch (err) {
@@ -361,14 +338,24 @@ app.get('/api/buscar-nome-codbarras/:codigo', async (req, res) => {
   return res.json({ nome: '' });
 });
 
-/**
- * Health check
- */
+/* ================== HEALTHCHECK ================== */
 app.get('/health', (_req, res) => {
   res.send({ status: 'ok' });
 });
 
-// Middleware de erro sempre por último
-app.use(errorHandler);
+/* ================ ERROR HANDLER ================ */
+app.use(require('./src/middleware/errorHandler') || errorHandler);
 
+/* ============ EXPORTA O APP ============ */
+/**
+ * Se você usa um arquivo separado que dá `app.listen(...)`,
+ * mantenha o `module.exports = app;`.
+ * Se preferir subir direto aqui, descomente o listen abaixo.
+ */
 module.exports = app;
+
+// // Descomente se quiser ouvir aqui mesmo:
+// const PORT = process.env.PORT || 3000;
+// app.listen(PORT, () => {
+//   console.log(`API rodando na porta ${PORT}`);
+// });
