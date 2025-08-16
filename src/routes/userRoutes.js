@@ -1,4 +1,3 @@
-// src/routes/userRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -9,11 +8,7 @@ const https = require("https");
 
 // ---- AWS SDK / R2 (opcional) ----
 const { NodeHttpHandler } = require("@smithy/node-http-handler");
-const {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-} = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -41,7 +36,7 @@ function parseBool(v) {
 function normalizeSameSite(v) {
   const s = String(v || "").toLowerCase().trim();
   if (s === "lax" || s === "strict" || s === "none") return s;
-  return ""; // inválido -> forçaremos padrão abaixo
+  return ""; // inválido -> forçamos padrão abaixo
 }
 
 // =============================================================================
