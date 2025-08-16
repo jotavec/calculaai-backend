@@ -23,7 +23,7 @@ const TOKEN_TTL_MS = TOKEN_DIAS * 24 * 60 * 60 * 1000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
 
-// Defina no .env -> COOKIE_DOMAIN=.calculaaiabr.com para funcionar em app. e api.
+// Defina no .env -> COOKIE_DOMAIN=.calculaaibr.com para funcionar em app. e api.
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN && process.env.COOKIE_DOMAIN.trim();
 
 const COOKIE_SECURE_ENV = (process.env.COOKIE_SECURE || "").trim();   // "true" | "false" | ""

@@ -53,14 +53,14 @@ app.set('trust proxy', 1);
  * - localhost (dev)
  * - FRONTEND_ORIGIN / FRONTEND_URL / FRONTEND_ORIGIN_2 / FRONTEND_ORIGIN_3 do .env
  * - IP atual em HTTP (http://44.194.33.48) — ajuste se o IP trocar
- * - *.vercel.app (builds do Vercel)
- * - https://app.calculaaiabr.com (frontend prod via Cloudflare)
+ * - *.vercel.app (builds do Vercel) para deploy previews
+ * - https://app.calculaaibr.com (frontend prod via Cloudflare)
  */
 const STATIC_ALLOWED = [
   'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:60378',
-  'https://app.calculaaiabr.com',
+  'https://app.calculaaibr.com',
 ];
 
 const ENV_ALLOWED = [
