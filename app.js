@@ -1,7 +1,6 @@
-// app.js
 'use strict';
 
-// Carrega .env localmente se a DATABASE_URL não existir no ambiente
+// Carrega .env localmente **apenas** se a DATABASE_URL não existir no ambiente (PM2/produção já injeta isso)
 if (!process.env.DATABASE_URL) {
   require('dotenv').config();
 }
@@ -50,7 +49,7 @@ app.set('trust proxy', 1);
 
 /* ==================== CORS ====================== */
 /**
- * Liberamos:
+ * Permitidos:
  * - localhost (dev)
  * - FRONTEND_ORIGIN / FRONTEND_URL / FRONTEND_ORIGIN_2 / FRONTEND_ORIGIN_3 do .env
  * - IP atual em HTTP (http://44.194.33.48) — ajuste se o IP trocar
@@ -74,8 +73,10 @@ const ENV_ALLOWED = [
 // IP público atual (HTTP). Se mudar o IP, atualize aqui ou crie uma env ALLOWED_IP
 const ALLOWED_IP = process.env.ALLOWED_IP || 'http://44.194.33.48';
 
-// Conjunto final (normalizado sem barra final)
+// Normaliza removendo barra final
 const normalize = (u) => (typeof u === 'string' ? u.replace(/\/+$/, '') : u);
+
+// Conjunto final
 const allowedSet = new Set(
   [...STATIC_ALLOWED, ...ENV_ALLOWED, ALLOWED_IP, `${ALLOWED_IP}:80`]
     .filter(Boolean)
@@ -84,7 +85,7 @@ const allowedSet = new Set(
 
 const isVercel = (origin) => /^https?:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
-// Garante que caches respeitem o CORS por origem
+// Ajuda o cache a respeitar CORS por origem
 app.use((req, res, next) => {
   res.setHeader('Vary', 'Origin');
   next();
@@ -92,21 +93,20 @@ app.use((req, res, next) => {
 
 /**
  * Delegate que NÃO lança erro quando a Origin não é permitida.
- * Se não permitido -> origin:false (não habilita CORS), mas sem estourar 500.
+ * Se não permitido -> origin:false (não habilita CORS), mas sem 500.
  */
 const corsDelegate = (req, cb) => {
   const origin = req.header('Origin');
   const o = origin ? normalize(origin) : '';
 
-  const allow =
-    !o || allowedSet.has(o) || isVercel(o);
+  const allow = !o || allowedSet.has(o) || isVercel(o);
 
   const options = allow
     ? {
         origin: true, // ecoa a Origin do pedido
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
         maxAge: 86400, // cache do preflight
         optionsSuccessStatus: 204,
       }
