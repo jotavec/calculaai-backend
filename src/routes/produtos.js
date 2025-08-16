@@ -331,11 +331,47 @@ router.put("/:id", async (req, res) => {
  * /produtos/{id}:
  *   delete:
  *     tags: [Produtos]
- *     summary: Remove um produto pelo ID
+ *     summary: Remove um produto pelo ID (apenas do usuário autenticado)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID do produto
+ *     responses:
+ *       204:
+ *         description: Produto deletado com sucesso
+ *       401:
+ *         description: Token não fornecido ou inválido
+ *       403:
+ *         description: Acesso negado - produto não pertence ao usuário
+ *       404:
+ *         description: Produto não encontrado
+ *       500:
+ *         description: Erro interno do servidor
  */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.userId;
+
+    // Verifica se o produto existe e pertence ao usuário
+    const produto = await prisma.produto.findUnique({
+      where: { id },
+      select: { userId: true }
+    });
+
+    if (!produto) {
+      return res.status(404).json({ error: "Produto não encontrado." });
+    }
+
+    if (produto.userId !== userId) {
+      return res.status(403).json({ error: "Acesso negado. Este produto não pertence ao usuário." });
+    }
+
+    // Deleta o produto
     await prisma.produto.delete({
       where: { id },
     });
